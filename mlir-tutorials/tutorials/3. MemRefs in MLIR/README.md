@@ -15,6 +15,12 @@ func.func @array_index(%buffer: memref<1024xf32>, %array_idx: index) -> (f32) {
   return %res : f32
 }
 ```
+This is equivalent to doing:
+```python
+def array_index(buffer, array_idx):
+  res = buffer[array_idx]
+  return res
+```
 
 As we can see here, we're using `memref.load` which loads the 
 
@@ -120,8 +126,8 @@ mlir-translate array_index_opt.mlir --mlir-to-llvmir -o array_index.ll
 And continue execution of program just like our previous tutorials as follows:
 
 ```
-llc -filetype=obj array_index.ll -o array_index.o
-$CC -shared array_index.o -o libarray_index.so
+llc -filetype=obj --relocation-model=pic array_index.ll -o array_index.o
+$CC -shared -fPIC array_index.o -o libarray_index.so
 ```
 
 And run the program within Python.
@@ -188,6 +194,23 @@ func.func @array_sum(%input_array: memref<1024xf32>, %lb: index, %ub: index, %st
 }
 
 ```
+This is equivalent to doing:
+```python
+def loop_add_conditional(input_array, lb, ub, step):
+  sum_0 = 0
+
+  sum_iter = sum_0 # Assignment is part of loop format
+  for loop_index in range(lb, ub, step):
+
+    t = input_array[loop_index]
+    sum_next = sum_iter + t
+
+    sum_iter = sum_next # Assignment is part of loop format
+  sum = sum_iter # Assignment is part of loop format
+
+  return sum 
+```
+
 
 As you can see instead of adding the index for the loop we're instead loading the value within the `memref` using `memref.load` and using `arith.addf` upon the generated value and the `%sum_iter` and yeild the final sum as we did last time. 
 
@@ -362,8 +385,8 @@ mlir-translate array_sum_opt.mlir --mlir-to-llvmir -o array_sum.ll
 And continue execution of program just like our previous tutorials as follows:
 
 ```
-llc -filetype=obj array_sum.ll -o array_sum.o
-$CC -shared array_sum.o -o libarray_sum.so
+llc -filetype=obj --relocation-model=pic array_sum.ll -o array_sum.o
+$CC -shared -fPIC array_sum.o -o libarray_sum.so
 ```
 
 And run the program within Python:
@@ -433,7 +456,26 @@ func.func @array_trig(%array_1: memref<1024xf64>, %array_2: memref<1024xf64>, %r
 }
 
 ```
+This is equivalent to doing:
+```python
+def array_trig(array_1, array_2, res_array, lb, ub, step):
+  for iv in range(lb, ub, step):
+    u = array_1[iv]
+    v = array_2[iv]
 
+    sin_value = math.sin(u)
+    cos_value = math.cos(v)
+
+    power = 2
+    sin_sq = pow(sin_value, 2)
+    cos_sq = pow(cos_value, 2)
+
+    res_value = sin_sq + cos_sq
+
+    res_array[iv] = res_value
+
+  return 
+```
 Now we execute the same set of commands upon this example:
 
 ```
@@ -450,7 +492,7 @@ And continue execution of program just like our previous tutorials as follows:
 
 ```
 llc -filetype=obj array_trig.ll -o array_trig.o
-$CC -shared array_trig.o -o libarray_trig.so
+$CC -shared -fPIC array_trig.o -o libarray_trig.so
 ```
 
 And run the program within Python:
@@ -498,5 +540,7 @@ print(array_trig(*array_1_as_memref, *array_2_as_memref, *res_array_as_memref, 0
 print(res_array)
 
 print(np.allclose(res_array, np.sin(array_1) ** 2 + np.cos(array_2) ** 2))
+
+print(np.allclose(res_array, np.ones_like(res_array)))
 
 ```

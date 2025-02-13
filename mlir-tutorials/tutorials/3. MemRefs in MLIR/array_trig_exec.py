@@ -40,3 +40,5 @@ print(array_trig(*array_1_as_memref, *array_2_as_memref, *res_array_as_memref, 0
 print(res_array)
 
 print(np.allclose(res_array, np.sin(array_1) ** 2 + np.cos(array_2) ** 2))
+
+print(np.allclose(res_array, np.ones_like(res_array)))

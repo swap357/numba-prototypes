@@ -38,7 +38,7 @@ Next you'll be needing various packages from conda such as `mlir` itself, `llvml
 Proceed to install them as follows:
 
 ```
-conda install mlir llvmlite
+conda install mlir llvmlite gcc_linux-64 
 ```
 
 All the required packages get installed as dependencies automatically. 
@@ -55,6 +55,16 @@ func.func @test_fma() -> f64 {
   %res = math.fma %arg1, %arg2, %arg3: f64
   func.return %res : f64
 }
+```
+
+which is equivalent to:
+
+```python
+def test_fma():
+  a = 1.0
+  b = 2.0
+  c = 3.0
+  return a * b + c
 ```
 
 and save it in a file `test_fma.mlir`. This will serve as the highest dialect of our compiler pipeline for this tutorial and will be lowered using multiple pass optimizations.
@@ -248,13 +258,13 @@ Now we have the LLVM-IR for our original FMA function. This IR can now be execut
 To compile the generated LLVM IR into an object file, we can use the LLVM provisioned `llc` compiler as follows:
 
 ```
-llc -filetype=obj test_fma.ll -o test_fma.o
+llc -filetype=obj --relocation-model=pic test_fma.ll -o test_fma.o
 ```
 
-This generates a `.o` object file that needs to be further converted to a `.so` shared object file that can be imported elsewhere. This can be done with using a object code linker specific to your system, for linux it's `gcc`. Fortunately `conda` provides a simple eviroment variable `$CC` which redirects the commands to whatever linker is present in the current conda environment depending on the system. This is done as follows:
+This generates a `.o` object file that needs to be further linked to create a `.so` shared library file. This can be done with using a object code linker specific to your system, for linux it's `gcc`. Fortunately `conda` provides a simple eviroment variable `$CC` which redirects the commands to whatever linker is present in the current conda environment depending on the system. This is done as follows:
 
 ```
-$CC -shared test_fma.o -o libtest_fma.so
+$CC -shared -fPIC test_fma.o -o libtest_fma.so
 ```
 
 This generates the required `.so` file that can be imported within your project. In Python for instance this can be done using `ctypes`:

@@ -20,6 +20,21 @@ func.func @loop_add(%lb: index, %ub: index, %step: index) -> (index) {
 
 ```
 
+This is equivalent to:
+
+```python
+def loop_add(lb, ub, step):
+  sum_0 = 0
+
+  sum_iter = sum_0 # Assignment is part of loop format
+  for iv in range(lb, ub, step):
+    sum_next = sum_iter + iv
+    sum_iter = sum_next # Assignment is part of loop format
+  sum = sum_iter # Assignment is part of loop format
+
+  return sum 
+```
+
 The `scf` dialect specializes in  operations that represent control flow constructs such as `if` and `for`. Structured control flow has a structure unlike, for example, `goto`s or `assert`s which are direct jump from one location to another within the logic.
 
 In our specific example above we've used a very specific operation [`scf.for`](https://mlir.llvm.org/docs/Dialects/SCFDialect/#scffor-scfforop) which requires `%start`, `%stop` and `%step` variables respectively. These is equivalent to writing `for(i=start;i<stop;i+=step)` loop in C++ or `for i in range(start, step, stop)` in Python. Then we define the `iter_args(..)` which define the common variable(s) across every iteration of the loop. For instance in our example after each iteration, the variable `%sum_iter` will be supplied to the loop body. The initial value in the first iteration of loop for the `%sum_iter` will be what we assigned to it at initialization during `iter_args()` i.e. `%sum_0` in our case. Then we yield values out of the first iteration using the `scf.yield` syntax, assigning the same yielded value to the `%sum_iter` in the next iteration. Hence continuing the for loop till the termination condition. This continues till the loop terminates and the final value is assigned to `%sum` which is then returned by the function. 
@@ -110,7 +125,7 @@ module {
 
 ```
 
-The most interesting transformation here is the `convert-scf-to-cf` which converts the human readable structured control flow into a more machine code (amchine readable) like form. It transforms the for loop into multiple jump (namely the `cf.br`) statements as follows:
+The most interesting transformation here is the `convert-scf-to-cf` which converts the human readable structured control flow into a more machine code (machine readable) like form. It transforms the for loop into multiple branch jump statements (namely the `cf.br` statements) as follows:
 
 ```
     %c0 = arith.constant 0 : index
@@ -173,8 +188,8 @@ Here we can see that the for loop has been completely decomposed into break stat
 Now we continue onto the compilation and execution of program as follows:
 
 ```
-llc -filetype=obj loop_add.ll -o loop_add.o
-$CC -shared loop_add.o -o libloop_add.so
+llc -filetype=obj --relocation-model=pic loop_add.ll -o loop_add.o
+$CC -shared -fPIC loop_add.o -o libloop_add.so
 ```
 
 And executing the code within Python as follows:
@@ -221,6 +236,28 @@ func.func @loop_add_conditional(%lb: index, %ub: index, %step: index, %limit: in
 
 ```
 
+This is equivalent to:
+
+```python
+def loop_add_conditional(lb, ub, step, limit):
+  sum_0 = 0
+
+  sum_iter = sum_0 # Assignment is part of loop format
+  for iv in range(lb, ub, step):
+    conditional_val = iv < limit
+
+    if conditional_val:
+      sum_next = sum_iter + iv
+    else:
+      sum_next = sum_iter
+
+    sum_iter = sum_next # Assignment is part of loop format
+  sum = sum_iter # Assignment is part of loop format
+
+  return sum 
+```
+
+
 Notice that similar to the `scf.for` the `scf.if` follows same notation that uses `scf.yield` to give a value out of the conditional closures. The type and number of the values to be yeilded need to be declared within the conditional declaration. As we do in our example by saying: `%sum_next = scf.if %conditional_val -> (index)` and `scf.yield %res_value: index`. This can be extended to multiple values as `%a, %b... = scf.if %cond -> (type_1, type_2....)` and `scf.yield %val_1, val_2....: type_1, type2....`. 
 
 Notice that for building our conditional statement, we're using `arith.cmpi slt` which is the integer comparision operation within the `arith` dialect. The `slt` stands for signed-less than operation. (Have a look at the [arith.cmpi](https://mlir.llvm.org/docs/Dialects/ArithOps/#arithcmpi-arithcmpiop) docs for more such comparision operation types).
@@ -239,8 +276,8 @@ mlir-translate loop_add_conditional_opt.mlir --mlir-to-llvmir -o loop_add_condit
 We get the required LLVM-IR which can then be compiled as follows:
 
 ```
-llc -filetype=obj loop_add_conditional.ll -o loop_add_conditional.o
-$CC -shared loop_add_conditional.o -o libloop_add_conditional.so
+llc -filetype=obj --relocation-model=pic loop_add_conditional.ll -o loop_add_conditional.o
+$CC -shared -fPIC loop_add_conditional.o -o libloop_add_conditional.so
 ```
 And executed in Python as follows:
 
