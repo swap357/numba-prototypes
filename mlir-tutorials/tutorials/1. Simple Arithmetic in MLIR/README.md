@@ -12,6 +12,8 @@ MLIR stands for Multi-Level Intermidiate Representation and as the name suggests
 
 Two terms that comes up a lot while working with MLIR projects are dialect and lowering. Dialect as the same suggests is the representation or the IR of the logic. While in traditional compiler we only had one dialect (this exists within the compiler itself); in MLIR we have multiple IRs each can be described as a dialect. 
 
+![MLIR Dialects](mlir-tutorials/images/mlir.drawio.svg)
+
 These dialects are then arranged on top of one another with the highest level on top (this is usually the language) and assembly/binary code at the lower end. The logic is then transformed from each of the higher level dialect to its immdiate next lower level dialect. This process is called lowering because the logic is being 'lowered' into a optimizable and eventually machine readable low level form. 
 
 # How does MLIR work?

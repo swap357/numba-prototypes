@@ -115,6 +115,9 @@ Notice that in the `convert-func-to-llvm` pass, the argument `%arg0: memref<1024
 - `shape`: An array of integers containing the shape of the original array. In our example, this represents first dimention, every other dimension is splatted across the arguments when converted to LLVM-IR unless we use `_ciface_` interface in which case it's represented as a struct.
 - `stride`: Array of integers containing strides of array, follows similar convention as shape. Strides is the number of elements in memory to jump for acessing the next index of a particulr dimension. 
 
+![Memref Pointers](mlir-tutorials/images/alignment.drawio.svg)
+
+
 ## Program compilation and execution
 
 Next we use `mlir-translate` and compile the generated MLIR into LLVM IR using:
