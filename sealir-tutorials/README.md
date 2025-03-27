@@ -4,8 +4,8 @@
 ## Setup
 
 ```bash
-conda env create -f=./conda_environment.yml -n sealir_basic_compiler
-conda activate sealir_basic_compiler
+conda env create -f=./conda_environment.yml -n sealir_tutorial
+conda activate sealir_tutorial
 pip install git+https://github.com/numba/sealir
 ```
 
@@ -14,15 +14,32 @@ pip install git+https://github.com/numba/sealir
 
 Showcase a basic SealIR compiler without a middle-end. Only frontend and backend.
 
-## What it does?
+### What it does?
 
 - Compiles a function-at-a-time into LLVM
 - LLVM uses Python C-API
 - Assumes to run as a JIT
 
 
-## Run
+### Run
 
 ```bash
 python ch01_basic_compiler.py
+```
+
+
+## Ch 2. EGraph Basic
+
+Showcase EGraph roundtripping in the middle-end.
+
+
+### What it does?
+
+- Adds middle-end to Ch01
+- Adds roundtripping from RVSDG to EGraph and back to RVSDG
+
+### Run
+
+```bash
+python ch02_egraph_basic.py
 ```

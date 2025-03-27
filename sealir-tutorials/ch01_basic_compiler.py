@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import builtins
+
 from llvmlite import binding as llvm
 from llvmlite import ir
 
@@ -31,7 +33,7 @@ def _determine_arity(root: ase.SExpr) -> int:
             raise TypeError(root._head)
 
 
-def backend(root, ns=__builtins__.__dict__):
+def backend(root, ns=builtins.__dict__):
     """
     Emit LLVM using Python C-API.
 
@@ -93,7 +95,7 @@ def backend(root, ns=__builtins__.__dict__):
     return mod
 
 
-def jit_compile(mod, arity):
+def jit_compile(mod, rvsdg_expr):
     """JIT compile LLVM module into an executable function for this process."""
     llvm_ir = str(mod)
 
@@ -107,6 +109,7 @@ def jit_compile(mod, arity):
         .link(lljit, "foo")
     )
     ptr = rt["foo"]
+    arity = _determine_arity(rvsdg_expr)
     return JitCallable.from_pointer(rt, ptr, arity)
 
 
@@ -130,7 +133,7 @@ def main():
     print("Backend: LLVM".center(80, '='))
     print(llmod)
 
-    jt = jit_compile(llmod, _determine_arity(rvsdg_expr))
+    jt = jit_compile(llmod, rvsdg_expr)
     res = jt(12)
 
     print("JIT: output".center(80, '='))
