@@ -119,15 +119,21 @@ def main():
 
     rvsdg_expr, dbginfo = frontend(sum_ints)
 
+    print("Frontend: Debug Info on RVSDG".center(80, '='))
     print(dbginfo.show_sources())
 
+    print("Frontend: RVSDG".center(80, '='))
     print(rvsdg.format_rvsdg(rvsdg_expr))
 
     llmod = backend(rvsdg_expr)
+
+    print("Backend: LLVM".center(80, '='))
     print(llmod)
 
     jt = jit_compile(llmod, _determine_arity(rvsdg_expr))
     res = jt(12)
+
+    print("JIT: output".center(80, '='))
     print(res)
 
 
