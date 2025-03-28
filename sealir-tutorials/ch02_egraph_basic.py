@@ -1,6 +1,6 @@
 from ch01_basic_compiler import frontend, backend, jit_compile
 
-from sealir import ase, rvsdg
+from sealir import rvsdg
 
 from sealir.eqsat.rvsdg_convert import egraph_conversion
 from sealir.eqsat.rvsdg_extract import egraph_extraction
@@ -27,34 +27,62 @@ def middle_end(rvsdg_expr, apply_to_egraph):
     return cost, extracted
 
 
-def main():
-    def sum_ints(n):
-        c = 1 + n
-        # WIP: fixing up SealIR to do loops
-        #     for i in range(n):
-        #         c += i
-        #     return c
-        return c
-
-    rvsdg_expr, dbginfo = frontend(sum_ints)
-
+def compiler_pipeline(fn, args, *, verbose=False):
+    rvsdg_expr, dbginfo = frontend(fn)
 
     # Middle end
     def display_egraph(egraph, root):
-        egraph.display()
+        # For now, the middle end is just an identity function that exercise
+        # the encoding into and out of egraph.
+        if verbose:
+            # For inspecting the egraph
+            egraph.display()  # opens a webpage when run
 
     cost, extracted = middle_end(rvsdg_expr, display_egraph)
-    print("Extracted from EGraph".center(80, '='))
+    print("Extracted from EGraph".center(80, "="))
     print("cost =", cost)
     print(rvsdg.format_rvsdg(extracted))
 
     llmod = backend(rvsdg_expr)
 
     jt = jit_compile(llmod, rvsdg_expr)
-    res = jt(12)
+    res = jt(*args)
 
-    print("JIT: output".center(80, '='))
+    print("JIT: output".center(80, "="))
     print(res)
+
+    assert res == fn(*args)
+
+
+def test_ch02_sum_ints():
+    def sum_ints(n):
+        c = 0
+        for i in range(n):
+            c += i
+        return c
+
+    compiler_pipeline(sum_ints, (12,), verbose=False)
+
+
+def test_ch02_max_two():
+    def max_if_else(x, y):
+        if x > y:
+            return x
+        else:
+            return y
+
+    compiler_pipeline(max_if_else, (1, 2), verbose=False)
+    compiler_pipeline(max_if_else, (3, 2), verbose=False)
+
+
+def main():
+    def sum_ints(n):
+        c = 1 + n
+        for i in range(n):
+            c += i
+        return c
+
+    compiler_pipeline(sum_ints, (12,), verbose=True)
 
 
 if __name__ == "__main__":
