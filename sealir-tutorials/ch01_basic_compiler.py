@@ -113,6 +113,53 @@ def jit_compile(mod, rvsdg_expr):
     return JitCallable.from_pointer(rt, ptr, arity)
 
 
+def compiler_pipeline(fn, args, *, verbose=False):
+    rvsdg_expr, dbginfo = frontend(fn)
+
+    if verbose:
+        print("Frontend: Debug Info on RVSDG".center(80, "="))
+        print(dbginfo.show_sources())
+
+        print("Frontend: RVSDG".center(80, "="))
+        print(rvsdg.format_rvsdg(rvsdg_expr))
+
+    llmod = backend(rvsdg_expr)
+
+    if verbose:
+        print("Backend: LLVM".center(80, "="))
+        print(llmod)
+
+    jt = jit_compile(llmod, rvsdg_expr)
+    res = jt(*args)
+
+    if verbose:
+        print("JIT: output".center(80, "="))
+        print(res)
+
+    assert res == fn(*args)
+
+
+def test_ch01_sum_ints():
+    def sum_ints(n):
+        c = 0
+        for i in range(n):
+            c += i
+        return c
+
+    compiler_pipeline(sum_ints, (12,), verbose=False)
+
+
+def test_ch01_max_two():
+    def max_if_else(x, y):
+        if x > y:
+            return x
+        else:
+            return y
+
+    compiler_pipeline(max_if_else, (1, 2), verbose=False)
+    compiler_pipeline(max_if_else, (3, 2), verbose=False)
+
+
 def main():
     def sum_ints(n):
         c = 0
@@ -120,24 +167,7 @@ def main():
             c += i
         return c
 
-    rvsdg_expr, dbginfo = frontend(sum_ints)
-
-    print("Frontend: Debug Info on RVSDG".center(80, '='))
-    print(dbginfo.show_sources())
-
-    print("Frontend: RVSDG".center(80, '='))
-    print(rvsdg.format_rvsdg(rvsdg_expr))
-
-    llmod = backend(rvsdg_expr)
-
-    print("Backend: LLVM".center(80, '='))
-    print(llmod)
-
-    jt = jit_compile(llmod, rvsdg_expr)
-    res = jt(12)
-
-    print("JIT: output".center(80, '='))
-    print(res)
+    compiler_pipeline(sum_ints, (12,), verbose=True)
 
 
 if __name__ == "__main__":
