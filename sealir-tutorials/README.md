@@ -9,6 +9,13 @@ conda activate sealir_tutorial
 pip install git+https://github.com/numba/sealir
 ```
 
+## Working on the notebooks
+
+Run `make all` to initialize `notebooks/*.ipynb` files.
+
+It can be easier to edit the markdown in `.ipynb` via visual editors.
+Edits can be synchronized to the paired py-ipynb files by `make sync`
+
 
 ## Ch 1. Basic Compiler
 

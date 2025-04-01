@@ -7,6 +7,10 @@ dependencies:
   - pytest
   - networkx
   - numpy
+  - nbconvert
+  - ipykernel
+  - jupytext
+  - make
   - pip:
     - egglog
     - numba_rvsdg

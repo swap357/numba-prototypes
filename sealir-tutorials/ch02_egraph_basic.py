@@ -1,3 +1,5 @@
+# ## Ch 2. Adding the EGraph middle-end
+
 from ch01_basic_compiler import frontend, backend, jit_compile
 
 from sealir import rvsdg

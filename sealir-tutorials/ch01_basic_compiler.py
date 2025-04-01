@@ -1,3 +1,22 @@
+# ---
+# jupyter:
+#   jupytext:
+#     text_representation:
+#       extension: .py
+#       format_name: light
+#       format_version: '1.5'
+#       jupytext_version: 1.16.7
+#   kernelspec:
+#     display_name: Python 3
+#     language: python
+#     name: python3
+# ---
+
+
+# # Ch 1. Basic Compiler
+#
+# ## AST frontend and LLVM backend
+
 from __future__ import annotations
 
 import builtins
@@ -15,6 +34,7 @@ from sealir.llvm_pyapi_backend import (
     JitCallable,
 )
 
+# ## The frontend
 
 def frontend(fn):
     """
