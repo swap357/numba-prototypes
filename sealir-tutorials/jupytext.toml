@@ -1,4 +1,2 @@
 # jupytext.toml at the root of your notebook directory
-[formats]
-"notebooks/" = "ipynb"
-"./" = "py:light"
+formats = "ipynb,py:light"

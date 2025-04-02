@@ -11,6 +11,8 @@ dependencies:
   - ipykernel
   - jupytext
   - make
+  - graphviz
+  - pip
   - pip:
     - egglog
     - numba_rvsdg
