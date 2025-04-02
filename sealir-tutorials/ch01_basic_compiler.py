@@ -20,6 +20,7 @@
 from __future__ import annotations
 
 import builtins
+from collections import ChainMap
 
 from llvmlite import binding as llvm
 from llvmlite import ir
@@ -78,7 +79,7 @@ def backend(root, ns=builtins.__dict__):
     ll_pyobject_ptr = ll_byte.as_pointer()
     # Make LLVM function
     arity = _determine_arity(root)
-    bodynode = root.body
+
     assert arity >= 1
     actual_num_args = arity
     fnty = ir.FunctionType(
@@ -100,18 +101,11 @@ def backend(root, ns=builtins.__dict__):
         llvm_func=fn,
         builder=builder,
         pyapi=PythonAPI(builder),
-        retval_slot=retval_slot,
-        ports={},
-        global_ns=ns,
+        global_ns=ChainMap(ns, __builtins__),
     )
 
     # Emit the function body
-    memo = ase.traverse(bodynode, _codegen_loop, CodegenState(context=ctx))
-
-    # Handle return value
-    retval = memo[bodynode].value
-    builder.ret(retval)
-
+    ase.traverse(root, _codegen_loop, CodegenState(context=ctx))
     return mod
 
 
