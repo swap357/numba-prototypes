@@ -1,3 +1,17 @@
+# ---
+# jupyter:
+#   jupytext:
+#     text_representation:
+#       extension: .py
+#       format_name: light
+#       format_version: '1.5'
+#       jupytext_version: 1.16.7
+#   kernelspec:
+#     display_name: sealir_basic_compiler
+#     language: python
+#     name: python3
+# ---
+
 # ## Ch 2. Adding the EGraph middle-end
 #
 # Traditional compiler design depends on a series of compiler passes. However,
