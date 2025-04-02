@@ -24,18 +24,18 @@ from collections import ChainMap
 
 from llvmlite import binding as llvm
 from llvmlite import ir
-
-from sealir import rvsdg, ase
-from sealir.rvsdg import grammar as rg
+from sealir import ase, rvsdg
 from sealir.llvm_pyapi_backend import (
-    _codegen_loop,
-    CodegenState,
     CodegenCtx,
-    PythonAPI,
+    CodegenState,
     JitCallable,
+    PythonAPI,
+    _codegen_loop,
 )
+from sealir.rvsdg import grammar as rg
 
 # ## The frontend
+
 
 def frontend(fn):
     """

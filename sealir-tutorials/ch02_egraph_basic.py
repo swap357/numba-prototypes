@@ -1,14 +1,12 @@
 # ## Ch 2. Adding the EGraph middle-end
 
-from ch01_basic_compiler import frontend, backend, jit_compile
-
-from sealir import rvsdg
-
-from sealir.eqsat.rvsdg_convert import egraph_conversion
-from sealir.eqsat.rvsdg_extract import egraph_extraction
-from sealir.eqsat.rvsdg_eqsat import GraphRoot
-
 from egglog import EGraph
+from sealir import rvsdg
+from sealir.eqsat.rvsdg_convert import egraph_conversion
+from sealir.eqsat.rvsdg_eqsat import GraphRoot
+from sealir.eqsat.rvsdg_extract import egraph_extraction
+
+from ch01_basic_compiler import backend, frontend, jit_compile
 
 
 def middle_end(rvsdg_expr, apply_to_egraph):
