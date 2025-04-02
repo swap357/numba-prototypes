@@ -9,6 +9,7 @@ dependencies:
   - numpy
   - nbconvert
   - ipykernel
+  - jupyter
   - jupytext
   - make
   - graphviz
