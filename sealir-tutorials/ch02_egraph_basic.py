@@ -27,7 +27,6 @@ from sealir.eqsat.rvsdg_eqsat import GraphRoot
 from sealir.eqsat.rvsdg_extract import egraph_extraction
 
 # We'll be extending from chapter 1.
-
 from ch01_basic_compiler import backend, frontend, jit_compile, run_test
 
 # ## A simple roundtripping to and from EGraph
@@ -42,11 +41,13 @@ from ch01_basic_compiler import backend, frontend, jit_compile, run_test
 # function. The two are almost a direct mapping.
 
 if __name__ == "__main__":
+
     def max_if_else(x, y):
         if x > y:
             return x
         else:
             return y
+
     # Get RVSDG
     rvsdg_expr, dbginfo = frontend(max_if_else)
     print(rvsdg.format_rvsdg(rvsdg_expr))
@@ -83,6 +84,7 @@ if __name__ == "__main__":
 
 # ## Putting the middle-end logic together
 
+
 def middle_end(rvsdg_expr, apply_to_egraph):
     """The middle end encode the RVSDG into a EGraph to apply rewrite rules.
     After that, it is extracted back into RVSDG.
@@ -101,6 +103,7 @@ def middle_end(rvsdg_expr, apply_to_egraph):
 
 
 # Here, we redefine the compiler pipeline to include the middle-end.
+
 
 def compiler_pipeline(fn, *, verbose=False):
     rvsdg_expr, dbginfo = frontend(fn)
@@ -136,5 +139,3 @@ if __name__ == "__main__":
 
     jt = compiler_pipeline(sum_ints, verbose=True)
     run_test(sum_ints, jt, (12,))
-
-
