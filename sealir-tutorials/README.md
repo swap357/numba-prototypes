@@ -1,6 +1,5 @@
 # Tutorial
 
-
 ## Setup
 
 ```bash
@@ -11,42 +10,17 @@ pip install git+https://github.com/numba/sealir
 
 ## Working on the notebooks
 
-Run `make all` to initialize `notebooks/*.ipynb` files.
+Run `make all` to initialize `*.ipynb` files.
 
 It can be easier to edit the markdown in `.ipynb` via visual editors.
 Edits can be synchronized to the paired py-ipynb files by `make sync`
 
+Run `make format` to use `black` and `isort` to auto-format the scripts. 
 
-## Ch 1. Basic Compiler
+To remove the `*.ipynb` files, run `make clean`.
 
-Showcase a basic SealIR compiler without a middle-end. Only frontend and backend.
+## Testing
 
-### What it does?
+Tests are located in `./tests` directory.
 
-- Compiles a function-at-a-time into LLVM
-- LLVM uses Python C-API
-- Assumes to run as a JIT
-
-
-### Run
-
-```bash
-python ch01_basic_compiler.py
-```
-
-
-## Ch 2. EGraph Basic
-
-Showcase EGraph roundtripping in the middle-end.
-
-
-### What it does?
-
-- Adds middle-end to Ch01
-- Adds roundtripping from RVSDG to EGraph and back to RVSDG
-
-### Run
-
-```bash
-python ch02_egraph_basic.py
-```
+Use `pytest` to run all tests.
