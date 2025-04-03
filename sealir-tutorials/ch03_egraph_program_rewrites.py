@@ -84,6 +84,7 @@ def IsConstantFalse(t: Term) -> Unit: ...
 # set of rules for recognizing constants, laying the groundwork for our
 # optimization process.
 
+
 @ruleset
 def ruleset_const_propagate(a: Term, ival: i64):
     # a Literal Int64 is constant True if it's non-zero
