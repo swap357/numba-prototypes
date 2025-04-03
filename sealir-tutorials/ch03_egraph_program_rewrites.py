@@ -14,7 +14,9 @@
 
 # # Ch 3. EGraph Program Rewrites
 #
-# In this chapter, we will implement our first program rewrite.
+# In this chapter, we’ll walk through implementing our first program rewrite,
+# guiding you step-by-step as we transform code using the tools and techniques
+# introduced earlier.
 
 from __future__ import annotations
 
@@ -32,8 +34,7 @@ from ch02_egraph_basic import (
     run_test,
 )
 
-# Here's a new compiler pipeline with customizable rulesets.
-# A new `ruleset` argument is added.
+# Next, we’ll explore a new compiler pipeline designed with customizable rulesets. To enable this flexibility, we’ve introduced a `ruleset` argument, allowing you to tailor the pipeline’s behavior to your specific needs.
 
 
 def compiler_pipeline(fn, *, verbose=False, ruleset):
@@ -61,10 +62,10 @@ def compiler_pipeline(fn, *, verbose=False, ruleset):
 
 # ## Rules for defining constants
 #
-# Starting with a simple rule, we will define what is a constant boolean.
-# To do so, they are setup as an `egglog.function`.
-# It will acts as a fact on a `Term` if the `Term` is an expression of a literal
-# int64.
+# Now, let’s define a simple rule by specifying what makes a constant boolean. We’ll use `egglog.function` to annotate properties on terms (`Term` instances). Each term directly corresponds to an RVSDG-IR node, which in turn maps to a Python AST node. As a result, a term can represent various constructs—such as an expression, a literal constant, an operation, or a control-flow element.
+#
+# An `egglog.function` acts as a symbolic entity, meaning it doesn’t require a function body. In our case, we’ll use it to mark specific terms: a term is labeled as `IsConstantTrue(Term)` if it represents an expression of a non-zero literal int64, indicating a constant `True`. Conversely, we mark a term as `IsConstantFalse(Term)` if it’s an expression of a literal zero, signifying a constant `False`.
+#
 
 
 # +
@@ -78,6 +79,10 @@ def IsConstantFalse(t: Term) -> Unit: ...
 
 # -
 
+
+# Rules can be organized into groups known as `ruleset`. Below, we’ll define a
+# set of rules for recognizing constants, laying the groundwork for our
+# optimization process.
 
 @ruleset
 def ruleset_const_propagate(a: Term, ival: i64):
@@ -101,6 +106,10 @@ def ruleset_const_propagate(a: Term, ival: i64):
     )
 
 
+# Now, we’ll test our newly defined ruleset. This complete ruleset combines a
+# few built-in RVSDG rules with our recently crafted simple constant-propagation
+# rules.
+
 if __name__ == "__main__":
 
     def ifelse_fold(a, b):
@@ -117,13 +126,15 @@ if __name__ == "__main__":
     run_test(ifelse_fold, jt, (12, 34))
 
 
-# In the above, notice there's a new node for `IsConstantFalse` on the
-# `LiteralI64(0)`. That shows it is successfully finding constants.
+# In the example above, observe that a new `IsConstantFalse` node appears on the
+# `LiteralI64(0)`. This indicates that our ruleset is successfully identifying
+# constants as intended.
 
 # ## Rules for folding if-else
 #
-# Let's make a more involved rule. This time we will fold if-else expression
-# that has constant condition.
+# Now, let’s create a more complex rule. This time, we’ll fold an if-else
+# expression when its condition is a constant, simplifying the code by resolving
+# the branch at compile time.
 
 
 @ruleset
@@ -162,11 +173,12 @@ if __name__ == "__main__":
     jt = compiler_pipeline(ifelse_fold, verbose=True, ruleset=my_ruleset)
     run_test(ifelse_fold, jt, (12, 34))
 
-# After the rewrite, the RVSDG is simplied to a mostly empty function body. The
-# `!ret` is hard coded to `$0[2]` which is the variable `b`, corresponding to
-# the `return b` in the `else` branch.
+# After applying the rewrite, the RVSDG simplifies dramatically, leaving a
+# nearly empty function body. The `!ret` instruction is now hardcoded to
+# `$0[2]`, which represents the variable `b`, aligning with the `return b` from
+# the `else` branch.
 #
-# The egraph has become more interesting with many nodes merged, indicating
-# they are equivalent. For instance, the `Term.Apply` and `Term.IfElse` nodes
-# are merged.
-#
+# Meanwhile, the EGraph becomes more intriguing, with numerous nodes merged to
+# reflect their equivalence. For example, the `Term.Apply` and `Term.IfElse`
+# nodes are now combined, showcasing how the rewrite consolidates equivalent
+# expressions.
