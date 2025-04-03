@@ -62,9 +62,19 @@ def compiler_pipeline(fn, *, verbose=False, ruleset):
 
 # ## Rules for defining constants
 #
-# Now, let’s define a simple rule by specifying what makes a constant boolean. We’ll use `egglog.function` to annotate properties on terms (`Term` instances). Each term directly corresponds to an RVSDG-IR node, which in turn maps to a Python AST node. As a result, a term can represent various constructs—such as an expression, a literal constant, an operation, or a control-flow element.
+# Now, let’s define a simple rule by specifying what makes a constant boolean.
+# We’ll use `egglog.function` to annotate properties on terms (`Term`
+# instances). Each term directly corresponds to an RVSDG-IR node, which in turn
+# maps to a Python AST node. As a result, a term can represent various
+# constructs—such as an expression, a literal constant, an operation, or a
+# control-flow element.
 #
-# An `egglog.function` acts as a symbolic entity, meaning it doesn’t require a function body. In our case, we’ll use it to mark specific terms: a term is labeled as `IsConstantTrue(Term)` if it represents an expression of a non-zero literal int64, indicating a constant `True`. Conversely, we mark a term as `IsConstantFalse(Term)` if it’s an expression of a literal zero, signifying a constant `False`.
+# An `egglog.function` acts as a symbolic entity, meaning it doesn’t require a
+# function body. In our case, we’ll use it to mark specific terms: a term is
+# labeled as `IsConstantTrue(Term)` if it represents an expression of a non-zero
+# literal int64, indicating a constant `True`. Conversely, we mark a term as
+# `IsConstantFalse(Term)` if it’s an expression of a literal zero, signifying a
+# constant `False`.
 #
 
 
