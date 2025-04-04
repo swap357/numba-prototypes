@@ -1,0 +1,19 @@
+channels:
+  - defaults
+dependencies:
+  - python=3.12
+  - llvmlite=0.44.*
+  - mlir=17.0.*
+  - pytest
+  - networkx
+  - numpy
+  - nbconvert
+  - ipykernel
+  - jupyter
+  - jupytext
+  - make
+  - graphviz
+  - pip
+  - pip:
+    - egglog
+    - numba_rvsdg
