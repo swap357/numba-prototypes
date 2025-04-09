@@ -137,8 +137,8 @@ def compiler_pipeline(fn, *, verbose=False):
     print("cost =", cost)
     print(rvsdg.format_rvsdg(extracted))
 
-    llmod = backend(rvsdg_expr)
-    return jit_compile(llmod, rvsdg_expr)
+    llmod = backend(extracted)
+    return jit_compile(llmod, extracted)
 
 
 # The following exercises our new pipeline:
