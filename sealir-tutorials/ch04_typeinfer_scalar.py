@@ -13,6 +13,8 @@
 # ---
 
 # ## Ch 4. Type inference for scalar operations
+#
+# In this chapter, we'll add type inference logic into the EGraph middle-end.
 
 from egglog import (
     EGraph,
@@ -45,6 +47,13 @@ from ch03_egraph_program_rewrites import (
     run_test,
 )
 
+# First, we need some modifications to the compiler-pipeline.
+# The middle-end is augmented with the following:
+#
+# - `converter_class` is for customizing EGraph-to-RVSDG conversion as we will be
+#   introducing new RVSDG operations for typed operations.
+# - `cost_model` is for customizing the cost of the new operations.
+
 
 def middle_end(rvsdg_expr, apply_to_egraph, converter_class, cost_model):
     # Convert to egraph
@@ -59,10 +68,14 @@ def middle_end(rvsdg_expr, apply_to_egraph, converter_class, cost_model):
     cost, extracted = egraph_extraction(
         egraph,
         rvsdg_expr,
-        converter_class=converter_class,
-        cost_model=cost_model,
+        converter_class=converter_class,  # <---- new
+        cost_model=cost_model,  # <---- new
     )
     return cost, extracted
+
+
+# The compiler_pipeline will have a `codegen_extension` for defining LLVM
+# code-generation for the new operations.
 
 
 def compiler_pipeline(
@@ -78,10 +91,9 @@ def compiler_pipeline(
 
     # Middle end
     def define_egraph(egraph: EGraph, func):
-        # For now, the middle end is just an identity function that exercise
-        # the encoding into and out of egraph.
         root = GraphRoot(func)
         egraph.let("root", root)
+
         egraph.run(ruleset.saturate())
         if verbose:
             # For inspecting the egraph
@@ -104,12 +116,22 @@ def compiler_pipeline(
     return jit_compile(llmod, extracted)
 
 
+# ## A Simple Type Inference Example
+
+# First, we will start with a simple binary add operation.
+
+
 def add_x_y(x, y):
     return x + y
 
 
+# We will start with the same ruleset as in chapter 3.
+
 basic_ruleset = rvsdg_eqsat.ruleset_rvsdg_basic | ruleset_const_propagate
 
+
+# We will test our base compiler (ch 3 compiler behavior) on our function to set
+# the baseline. At this stage, no type inference is happening.
 
 if __name__ == "__main__":
     # start with previous compiler pipeline
@@ -117,29 +139,44 @@ if __name__ == "__main__":
     run_test(add_x_y, jt, (123, 321), verbose=True)
 
 
-# adding type inference
+# ### Adding type inference
+#
+# A new EGraph expression class (`Expr`) is added to represent type:
 
 
 class Type(Expr):
     def __init__(self, name: StringLike): ...
 
 
+# Then, we add a EGraph function to determine the type-of a `Term`:
+
+
 @function
 def TypeOf(x: Term) -> Type: ...
 
 
+# Next, we define functions for the new operations:
+#
+# - `Nb_Unbox_Int64` unboxes a PyObject into a Int64.
+# - `Nb_Box_Int64` boxes a Int64 into a PyObject.
+# - `Nb_Unboxed_Add_Int64` performs a Int64 addition on unboxed operands.
+
+
 @function
 def Nb_Unbox_Int64(val: Term) -> Term: ...
-
-
 @function
 def Nb_Box_Int64(val: Term) -> Term: ...
-
-
 @function
 def Nb_Unboxed_Add_Int64(lhs: Term, rhs: Term) -> Term: ...
 
 
+# Now, we define the first type-inference rule:
+#
+# If a `Py_AddIO()` (a Python binary add operation) is applied to operands
+# that are known Int64, convert it into the unboxed add. The output type will
+# be Int64. The IO state into the `Py_AddIO()` will be unchanged.
+
+# +
 TypeInt64 = Type("Int64")
 
 
@@ -163,6 +200,12 @@ def ruleset_type_infer_add(io: Term, x: Term, y: Term, add: Term):
     )
 
 
+# -
+
+# The following rule defines some fact about the function being compiled.
+# It declares that the two arguments are Int64.
+
+
 @ruleset
 def facts_argument_types(
     outports: PortList,
@@ -173,10 +216,12 @@ def facts_argument_types(
     arg_y: Term,
 ):
     yield rule(
-        Term.Func(
-            body=Term.RegionEnd(region=region, ports=outports),
-            uid=func_uid,
-            fname=fname,
+        GraphRoot(
+            Term.Func(
+                body=Term.RegionEnd(region=region, ports=outports),
+                uid=func_uid,
+                fname=fname,
+            )
         ),
         arg_x == region.get(1),
         arg_y == region.get(2),
@@ -186,28 +231,45 @@ def facts_argument_types(
     )
 
 
+# ### Defining conversion into RVSDG
+
+# We will expand the RVSDG grammar with the typed operations.
+#
+# Each of the new typed operations will require a corresponding grammar rule.
+
+# +
 SExpr = rvsdg.grammar.SExpr
 
 
-class _Root(grammar.Rule):
+class NbOp_Base(grammar.Rule):
     pass
 
 
-class NbOp_Unboxed_Add_Int64(_Root):
+class NbOp_Unboxed_Add_Int64(NbOp_Base):
     lhs: SExpr
     rhs: SExpr
 
 
-class NbOp_Unbox_Int64(_Root):
+class NbOp_Unbox_Int64(NbOp_Base):
     val: SExpr
 
 
-class NbOp_Box_Int64(_Root):
+class NbOp_Box_Int64(NbOp_Base):
     val: SExpr
+
+
+# -
+
+# The new grammar for our IR is a combination of the new typed-operation grammar
+# and the base RVSDG grammar.
 
 
 class Grammar(grammar.Grammar):
-    start = rvsdg.Grammar.start | _Root
+    start = rvsdg.Grammar.start | NbOp_Base
+
+
+# Now, we define a EGraph-to-RVSDG conversion class that is expanded to handle
+# the new grammar.
 
 
 class ExtendEGraphToRVSDG(EGraphToRVSDG):
@@ -222,7 +284,11 @@ class ExtendEGraphToRVSDG(EGraphToRVSDG):
             case "Nb_Box_Int64", {"val": val}:
                 return grm.write(NbOp_Box_Int64(val=val))
             case _:
+                # Use parent's implementation for other terms.
                 return super().handle_Term(op, children, grm)
+
+
+# The LLVM code-generation also needs an extension:
 
 
 def codegen_extension(expr, args, builder, pyapi):
@@ -236,30 +302,39 @@ def codegen_extension(expr, args, builder, pyapi):
     return NotImplemented
 
 
+# A new cost model to prioritize the typed operations:
+
+
 class MyCostModel(CostModel):
     def get_cost_function(self, nodename, op, cost, nodes, child_costs):
-        computed = None
+        self_cost = None
         match op:
             case "Nb_Unboxed_Add_Int64":
-                computed = 0.1
+                self_cost = 0.1
 
             case "Nb_Unbox_Int64":
-                computed = 0.1
+                self_cost = 0.1
 
             case "Nb_Box_Int64":
-                computed = 0.1
+                self_cost = 0.1
 
-        if computed is not None:
-            return computed + sum(child_costs)
+        if self_cost is not None:
+            return self_cost + sum(child_costs)
 
+        # Fallthrough to parent's cost function
         return super().get_cost_function(
             nodename, op, cost, nodes, child_costs
         )
 
 
+# The new ruleset with the type inference logic and facts about the compiled
+# function:
+
 typeinfer_ruleset = (
     basic_ruleset | ruleset_type_infer_add | facts_argument_types
 )
+
+# We are now ready to run the compiler:
 
 if __name__ == "__main__":
     jt = compiler_pipeline(
@@ -274,7 +349,21 @@ if __name__ == "__main__":
     run_test(add_x_y, jt, (123, 321), verbose=True)
 
 
+# Observations:
+#
+# - In the egraph, observe how the new operations are represented.
+# - In the RVSDG, notice the lack of `Py_AddIO()`
+# - In the LLVM, notice the addition is now done in native `i64`.
+
 # ## Optimize boxing logic
+
+
+# A key benefit of EGraph is that there is no need to specify ordering to
+# "compiler-passes". To demonstrate this, we will insert optimization rules
+# on the boxing and unboxing operation. `unbox(box(x))` is equivalent
+# to an no-op. We can remove redundant boxing and unboxing.
+
+# We will need more than one addition to showcase the optimization:
 
 
 def chained_additions(x, y):
@@ -293,18 +382,32 @@ if __name__ == "__main__":
     res = jt(123, 321)
     run_test(chained_additions, jt, (123, 321), verbose=True)
 
-# Improve the rules
+# Observations:
+#
+# ```
+#   $4 = NbOp_Box_Int64 $3
+#   $5 = NbOp_Unbox_Int64 $4
+# ```
+#
+# The box and unbox chain is redundant (i.e. `$3 = $5`).
+
+# ### Box/Unbox optimization rules
+
+
+# The needed optimization rule is very simple. Any chained box-unbox; or unbox-box
+# are redundant.
+#
+# (We use `subsume=True` to delete the original EGraph node (enode) to shrink
+# the graph early.)
 
 
 @ruleset
-def ruleset_optimize_boxing(io: Term, x: Term, y: Term, add: Term):
+def ruleset_optimize_boxing(x: Term):
     yield rewrite(Nb_Box_Int64(Nb_Unbox_Int64(x)), subsume=True).to(x)
     yield rewrite(Nb_Unbox_Int64(Nb_Box_Int64(x)), subsume=True).to(x)
 
 
-optimized_ruleset = (
-    typeinfer_ruleset | ruleset_optimize_boxing
-)  # <---- new rule
+optimized_ruleset = typeinfer_ruleset | ruleset_optimize_boxing
 
 if __name__ == "__main__":
 
@@ -318,3 +421,17 @@ if __name__ == "__main__":
     )
     res = jt(123, 321)
     run_test(chained_additions, jt, (123, 321), verbose=True)
+
+# Observations:
+#
+# ```
+#   $1 = NbOp_Unbox_Int64 $0[1]
+#   $2 = NbOp_Unbox_Int64 $0[2]
+#   $3 = NbOp_Unboxed_Add_Int64 $1 $2
+#   $4 = NbOp_Unboxed_Add_Int64 $3 $2
+#   $5 = NbOp_Box_Int64 $4
+# ```
+#
+# There is no redundant box-unbox between the two unboxed add anymore.
+
+#
