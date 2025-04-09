@@ -151,13 +151,16 @@ def _determine_arity(root: ase.SExpr) -> int:
             raise TypeError(root._head)
 
 
-def backend(root, ns=builtins.__dict__):
+def backend(root, ns=builtins.__dict__, codegen_extension=None):
     """
     Emit LLVM using Python C-API.
 
     root: the RVSDG expression for the function
     ns: is the dictionary of global names. A JIT is assumed. Object pointer for
         each key is used.
+    codegen_extension: Optional. If defined, it is the function to call when an
+        unknown operation is encountered by the code generator. This argument
+        is used in the later chapters.
 
     Warning:
 
@@ -199,6 +202,7 @@ def backend(root, ns=builtins.__dict__):
         builder=builder,
         pyapi=PythonAPI(builder),
         global_ns=ChainMap(ns, __builtins__),
+        codegen_extension=codegen_extension,
     )
 
     # Emit the function body
