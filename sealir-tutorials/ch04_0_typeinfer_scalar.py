@@ -12,9 +12,14 @@
 #     name: python3
 # ---
 
-# ## Ch 4. Type inference for scalar operations
+# ## Ch 4.0. Type inference for scalar operations
 #
 # In this chapter, we'll add type inference logic into the EGraph middle-end.
+# This chapter is divided into several parts that grows in complexity.
+# Here, in part 0, we will introduce a simple type inference logic that convert
+# each scalar operations at a time from Python objects into machine typed
+# operations.
+
 
 from egglog import (
     EGraph,
