@@ -2,3 +2,5 @@
 *.so
 *.pyc
 __pycache__
+pages/**
+.ipynb_checkpoints
