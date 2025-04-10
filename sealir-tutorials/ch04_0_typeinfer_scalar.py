@@ -12,7 +12,7 @@
 #     name: python3
 # ---
 
-# ## Ch 4.0. Type inference for scalar operations
+# ## Ch 4 Part 0. Type inference for scalar operations.
 #
 # In this chapter, we'll add type inference logic into the EGraph middle-end.
 # This chapter is divided into several parts that grows in complexity.
@@ -51,6 +51,7 @@ from ch03_egraph_program_rewrites import (
     ruleset_const_propagate,
     run_test,
 )
+from utils import IN_NOTEBOOK
 
 # First, we need some modifications to the compiler-pipeline.
 # The middle-end is augmented with the following:
@@ -100,7 +101,7 @@ def compiler_pipeline(
         egraph.let("root", root)
 
         egraph.run(ruleset.saturate())
-        if verbose:
+        if verbose and IN_NOTEBOOK:
             # For inspecting the egraph
             egraph.display(graphviz=True)
 
@@ -438,5 +439,3 @@ if __name__ == "__main__":
 # ```
 #
 # There is no redundant box-unbox between the two unboxed add anymore.
-
-#
