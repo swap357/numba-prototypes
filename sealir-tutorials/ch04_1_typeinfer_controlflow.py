@@ -20,29 +20,33 @@
 
 from __future__ import annotations
 
+import ctypes
+from contextlib import contextmanager
+from dataclasses import dataclass
+from typing import Any, Callable, Sequence
+
 from egglog import (
     EGraph,
     Expr,
     String,
     StringLike,
     Vec,
-    delete,
     function,
     i64,
     i64Like,
     rewrite,
     rule,
     ruleset,
-    set_,
     union,
 )
-from sealir import grammar, rvsdg
-from sealir.eqsat import rvsdg_eqsat
+from llvmlite import binding as llvm
+from llvmlite import ir
+from sealir import ase, grammar, rvsdg
 from sealir.eqsat.py_eqsat import Py_AddIO, Py_GtIO, Py_SubIO
-from sealir.eqsat.rvsdg_convert import egraph_conversion
 from sealir.eqsat.rvsdg_eqsat import (
     GraphRoot,
     InPorts,
+    Port,
     PortList,
     Region,
     Term,
@@ -53,16 +57,11 @@ from sealir.eqsat.rvsdg_eqsat import (
 from sealir.eqsat.rvsdg_extract import (
     CostModel,
     EGraphToRVSDG,
-    egraph_extraction,
 )
-from sealir.llvm_pyapi_backend import SSAValue
 from sealir.rvsdg import grammar as rg
 
 from ch03_egraph_program_rewrites import (
-    backend,
     frontend,
-    jit_compile,
-    ruleset_const_propagate,
     run_test,
 )
 from ch04_0_typeinfer_scalar import (
@@ -74,12 +73,13 @@ from utils import IN_NOTEBOOK
 
 def compiler_pipeline(
     fn,
+    argtypes,
     *,
     verbose=False,
     ruleset,
     converter_class=EGraphToRVSDG,
-    codegen_extension=None,
     cost_model=None,
+    backend,
 ):
     rvsdg_expr, dbginfo = frontend(fn)
 
@@ -104,11 +104,11 @@ def compiler_pipeline(
     print("cost =", cost)
     print(rvsdg.format_rvsdg(extracted))
 
-    # llmod = backend(extracted, codegen_extension=codegen_extension)
-    # if verbose:
-    #     print("LLVM module".center(80, "="))
-    #     print(llmod)
-    # return jit_compile(llmod, extracted)
+    llmod = backend.lower(extracted, argtypes)
+    if verbose:
+        print("LLVM module".center(80, "="))
+        print(llmod)
+    return backend.jit_compile(llmod, extracted)
 
 
 _wc = wildcard
@@ -225,8 +225,10 @@ class ExtendEGraphToRVSDG(EGraphToRVSDG):
         self, key: str, op: str, children: dict | list, grm: Grammar
     ):
         assert op == "Type"
-        [name] = children
-        return grm.write(NbOp_Type(name))
+        match children:
+            case {"name": name}:
+                return grm.write(NbOp_Type(name))
+        raise NotImplementedError
 
     def handle_Term(self, op: str, children: dict | list, grm: Grammar):
         match op, children:
@@ -240,18 +242,6 @@ class ExtendEGraphToRVSDG(EGraphToRVSDG):
             case _:
                 # Use parent's implementation for other terms.
                 return super().handle_Term(op, children, grm)
-
-
-# The LLVM code-generation also needs an extension:
-
-
-def codegen_extension(expr, args, builder, pyapi):
-    match expr._head, args:
-        case "NbOp_Add_Int64", (lhs, rhs):
-            return SSAValue(builder.add(lhs.value, rhs.value))
-        case "NbOp_Sub_Int64", (lhs, rhs):
-            return SSAValue(builder.sub(lhs.value, rhs.value))
-    return NotImplemented
 
 
 class MyCostModel(CostModel):
@@ -332,7 +322,6 @@ def ruleset_propagate_typeof_ifelse(
     then_region: Region,
     else_region: Region,
     idx: i64,
-    src: Term,
     ifelse: Term,
     then_ports: PortList,
     else_ports: PortList,
@@ -382,7 +371,7 @@ class TypedOuts(Expr):
 
 
 @ruleset
-def ruleset_region_args(
+def ruleset_region_types(
     region: Region,
     attrs: TypedIns,
     idx: i64,
@@ -408,21 +397,18 @@ def ruleset_region_args(
 
 
 @ruleset
-def facts_argument_types(
-    outports: PortList,
+def facts_function_types(
+    outports: Vec[Port],
     func_uid: String,
     reg_uid: String,
     fname: String,
     region: Region,
-    arg_x: Term,
-    arg_y: Term,
+    ret_term: Term,
 ):
-    if False:
-        return
     yield rule(
         GraphRoot(
             Term.Func(
-                body=Term.RegionEnd(region=region, ports=outports),
+                body=Term.RegionEnd(region=region, ports=PortList(outports)),
                 uid=func_uid,
                 fname=fname,
             )
@@ -434,6 +420,217 @@ def facts_argument_types(
     )
 
 
+# Lower
+def get_port_by_name(ports: Sequence[rg.Port], name: str):
+    for i, p in enumerate(ports):
+        if p.name == name:
+            return i, p
+    raise ValueError(f"{name!r} not found")
+
+
+class Attributes:
+    _typedins: tuple[NbOp_InTypeAttr, ...]
+    _typedouts: tuple[NbOp_OutTypeAttr, ...]
+
+    def __init__(self, attrs: rg.Attrs):
+        self._typedins = tuple(
+            filter(lambda x: isinstance(x, NbOp_InTypeAttr), attrs.attrs)
+        )
+        self._typedouts = tuple(
+            filter(lambda x: isinstance(x, NbOp_OutTypeAttr), attrs.attrs)
+        )
+
+    def get_typed_out(self, idx: int):
+        for at in self._typedouts:
+            if at.idx == idx:
+                return at
+        raise IndexError(idx)
+
+    def get_return_type(self, regionend: rg.RegionEnd):
+        i, p = get_port_by_name(regionend.ports, rvsdg.internal_prefix("ret"))
+        return self.get_typed_out(i).type
+
+
+class Backend:
+    def __init__(self):
+        self.initialize_llvm()
+
+    def initialize_llvm(self):
+        llvm.initialize()
+        llvm.initialize_native_target()
+        llvm.initialize_native_asmprinter()
+
+    def lower_type(self, ty: NbOp_Type):
+        match ty:
+            case NbOp_Type("Int64"):
+                return ir.IntType(64)
+        raise NotImplementedError(f"unknown type: {ty}")
+
+    def lower_io_type(self):
+        # IO type is an empty struct
+        return ir.LiteralStructType(())
+
+    def lower(self, root: rg.Func, argtypes):
+        mod = ir.Module()
+        llargtypes = [*map(self.lower_type, argtypes)]
+
+        fname = root.fname
+        retty = Attributes(root.body.begin.attrs).get_return_type(root.body)
+        llrettype = self.lower_type(retty)
+
+        fnty = ir.FunctionType(llrettype, llargtypes)
+        fn = ir.Function(mod, fnty, name=fname)
+        # init entry block and builder
+        builder = ir.IRBuilder(fn.append_basic_block("entry"))
+        iostate = ir.LiteralStructType(())(ir.Undefined)
+
+        # Emit the function body
+        reg_args_stack = []
+
+        @contextmanager
+        def push(*regionargs):
+            reg_args_stack.append(regionargs)
+            yield
+            reg_args_stack.pop()
+
+        def tos():
+            return reg_args_stack[-1]
+
+        def lower_expr(expr: SExpr, state: ase.TraverseState):
+            match expr:
+                case rg.RegionBegin(inports=inports):
+                    values = tos()
+                    assert len(values) == len(inports)
+                    return values
+                case rg.RegionEnd(begin=begin, ports=ports):
+                    yield begin
+                    portvalues = []
+                    for p in ports:
+                        pv = yield p.value
+                        portvalues.append(pv)
+                    return portvalues
+
+                case rg.IfElse(
+                    cond=cond, body=body, orelse=orelse, operands=operands
+                ):
+                    condval = yield cond
+
+                    # process operands
+                    ops = []
+                    for op in operands:
+                        ops.append((yield op))
+
+                    # unpack pybool
+                    match condval.type:
+                        case ir.IntType() if condval.type.width == 1:
+                            condbit = condval
+                        case _:
+                            raise NotImplementedError(
+                                f"unhandled if-cond type: {condval.type}"
+                            )
+
+                    bb_then = builder.append_basic_block("then")
+                    bb_else = builder.append_basic_block("else")
+                    bb_endif = builder.append_basic_block("endif")
+
+                    builder.cbranch(condbit, bb_then, bb_else)
+                    # Then
+                    with builder.goto_block(bb_then):
+                        with push(*ops):
+                            value_then = yield body
+                        builder.branch(bb_endif)
+                        bb_then_end = builder.basic_block
+                    # Else
+                    with builder.goto_block(bb_else):
+                        with push(*ops):
+                            value_else = yield orelse
+                        builder.branch(bb_endif)
+                        bb_else_end = builder.basic_block
+                    # EndIf
+                    builder.position_at_end(bb_endif)
+                    assert len(value_then) == len(value_else)
+                    phis = []
+                    for left, right in zip(
+                        value_then, value_else, strict=True
+                    ):
+                        assert left.type == right.type
+                        phi = builder.phi(left.type)
+                        phi.add_incoming(left, bb_then_end)
+                        phi.add_incoming(right, bb_else_end)
+                        phis.append(phi)
+                    return phis
+
+                case rg.Unpack(val=source, idx=int(idx)):
+                    return (yield source)[idx]
+
+                case NbOp_Gt_Int64(lhs, rhs):
+                    lhs = yield lhs
+                    rhs = yield rhs
+                    return builder.icmp_signed(">", lhs, rhs)
+
+                case NbOp_Add_Int64(lhs, rhs):
+                    lhs = yield lhs
+                    rhs = yield rhs
+                    return builder.add(lhs, rhs)
+
+                case NbOp_Sub_Int64(lhs, rhs):
+                    lhs = yield lhs
+                    rhs = yield rhs
+                    return builder.sub(lhs, rhs)
+
+            raise NotImplementedError(expr)
+
+        with push(iostate, *fn.args):
+            memo = ase.traverse(root.body, lower_expr)
+        func_region_outs = memo[root.body]
+
+        i, p = get_port_by_name(root.body.ports, rvsdg.internal_prefix("ret"))
+        builder.ret(func_region_outs[i])
+
+        return mod
+
+    def jit_compile(self, llmod: ir.Module, func_node: rg.Func):
+        sym = func_node.fname
+        # Create JIT
+        lljit = llvm.create_lljit_compiler()
+        rt = (
+            llvm.JITLibraryBuilder()
+            .add_ir(str(llmod))
+            .export_symbol(sym)
+            .add_current_process()
+            .link(lljit, sym)
+        )
+        ptr = rt[sym]
+
+        fnty = llmod.get_global(sym).type.pointee
+        ct_args = list(map(self.get_ctype, fnty.args))
+        ct_ret = self.get_ctype(fnty.return_type)
+
+        return JitCallable.from_pointer(rt, ptr, ct_args, ct_ret)
+
+    def get_ctype(self, lltype: ir.Type):
+        match lltype:
+            case ir.IntType():
+                match lltype.width:
+                    case 64:
+                        return ctypes.c_int64
+        raise NotImplementedError(lltype)
+
+
+@dataclass(frozen=True)
+class JitCallable:
+    rt: llvm.ResourceTracker
+    pyfunc: Callable
+
+    @classmethod
+    def from_pointer(cls, rt: llvm.ResourceTracker, ptr: int, argtys, retty):
+        pyfunc = ctypes.PYFUNCTYPE(retty, *argtys)(ptr)
+        return cls(rt=rt, pyfunc=pyfunc)
+
+    def __call__(self, *args: Any) -> Any:
+        return self.pyfunc(*args)
+
+
 def example(a, b):
     if a > b:
         z = a - b
@@ -443,8 +640,10 @@ def example(a, b):
 
 
 if __name__ == "__main__":
+    Int64 = NbOp_Type("Int64")
     jt = compiler_pipeline(
         example,
+        argtypes=(Int64, Int64),
         ruleset=(
             basic_ruleset
             | ruleset_propagate_typeof_ifelse
@@ -452,13 +651,13 @@ if __name__ == "__main__":
             | ruleset_type_infer_gt
             | ruleset_type_infer_add
             | ruleset_type_infer_sub
-            | ruleset_region_args
-            | facts_argument_types
+            | ruleset_region_types
+            | facts_function_types
         ),
         verbose=True,
         converter_class=ExtendEGraphToRVSDG,
-        codegen_extension=codegen_extension,
         cost_model=MyCostModel(),
+        backend=Backend(),
     )
     res = jt(10, 7)
     run_test(example, jt, (10, 7), verbose=True)
