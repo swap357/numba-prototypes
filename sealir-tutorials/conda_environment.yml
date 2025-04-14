@@ -18,3 +18,4 @@ dependencies:
   - pip:
     - egglog
     - numba_rvsdg
+    - git+https://github.com/numba/sealir
