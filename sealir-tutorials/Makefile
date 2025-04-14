@@ -35,7 +35,7 @@ $(PAGES_SUBDIR):
 
 # Pattern rule to convert .ipynb files to rendered .html
 $(PAGES_SUBDIR)/%.html: %.ipynb $(PAGES_SUBDIR)
-	jupyter nbconvert --to html --output=$@ $<
+	jupyter nbconvert --execute --to html --output=$@ $<
 
 # Clean target to remove generated notebooks and rendered HTML
 clean:
