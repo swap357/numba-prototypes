@@ -37,8 +37,9 @@ $(PAGES_SUBDIR):
 $(PAGES_SUBDIR)/%.html: %.ipynb $(PAGES_SUBDIR)
 	jupyter nbconvert --to html --output=$@ $<
 
-# Clean target to remove generated notebooks
+# Clean target to remove generated notebooks and rendered HTML
 clean:
-	rm -rf *.ipynb
+	rm -f $(IPYNB_FILES)
+	rm -f $(HTML_FILES)
 
 .PHONE: all sync dump
