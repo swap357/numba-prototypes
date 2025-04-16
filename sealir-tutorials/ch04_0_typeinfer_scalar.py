@@ -312,7 +312,7 @@ def codegen_extension(expr, args, builder, pyapi):
 
 
 class MyCostModel(CostModel):
-    def get_cost_function(self, nodename, op, cost, nodes, child_costs):
+    def get_cost_function(self, nodename, op, ty, cost, nodes, child_costs):
         self_cost = None
         match op:
             case "Nb_Unboxed_Add_Int64":
@@ -329,7 +329,7 @@ class MyCostModel(CostModel):
 
         # Fallthrough to parent's cost function
         return super().get_cost_function(
-            nodename, op, cost, nodes, child_costs
+            nodename, op, ty, cost, nodes, child_costs
         )
 
 

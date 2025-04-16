@@ -12,9 +12,9 @@
 #     name: python3
 # ---
 
-# ## Ch 4 Part 1. Fully typing a scalar function.
+# ## Ch 4 Part 1. Fully typing a scalar function with if-else branch
 #
-# We will consider control-flow constructs. We went from
+# We will consider control-flow constructs---the if-else branch. We went from
 # per-operation inference, to considering the entire function.
 
 
@@ -34,15 +34,17 @@ from egglog import (
     function,
     i64,
     i64Like,
+    method,
     rewrite,
     rule,
     ruleset,
+    set_,
     union,
 )
 from llvmlite import binding as llvm
 from llvmlite import ir
 from sealir import ase, grammar, rvsdg
-from sealir.eqsat.py_eqsat import Py_AddIO, Py_GtIO, Py_SubIO
+from sealir.eqsat.py_eqsat import Py_AddIO, Py_GtIO, Py_LtIO, Py_SubIO
 from sealir.eqsat.rvsdg_eqsat import (
     GraphRoot,
     InPorts,
@@ -115,17 +117,25 @@ _wc = wildcard
 
 
 class Type(Expr):
-    def __init__(self, name: StringLike): ...
+    @classmethod
+    def simple(self, name: StringLike) -> Type: ...
 
     def __or__(self, other: Type) -> Type: ...
 
 
-@function
-def TypeOf(x: Term) -> Type: ...
+class TypeVar(Expr):
+    def __init__(self, term: Term): ...
+
+    @method(merge=lambda x, y: x | y)
+    def getType(self) -> Type: ...
 
 
 @function
 def Nb_Gt_Int64(lhs: Term, rhs: Term) -> Term: ...
+
+
+@function
+def Nb_Lt_Int64(lhs: Term, rhs: Term) -> Term: ...
 
 
 @function
@@ -162,6 +172,11 @@ class NbOp_Gt_Int64(NbOp_Base):
     rhs: SExpr
 
 
+class NbOp_Lt_Int64(NbOp_Base):
+    lhs: SExpr
+    rhs: SExpr
+
+
 class NbOp_Add_Int64(NbOp_Base):
     lhs: SExpr
     rhs: SExpr
@@ -172,32 +187,87 @@ class NbOp_Sub_Int64(NbOp_Base):
     rhs: SExpr
 
 
+class NbOp_Not_Int64(NbOp_Base):
+    operand: SExpr
+
+
+class NbOp_Undef_Int64(NbOp_Base): ...
+
+
 class Grammar(grammar.Grammar):
     start = rvsdg.Grammar.start | NbOp_Base
+
+
+from sealir.rvsdg import restructuring
+
+
+def my_attr_format(attrs: rg.Attrs) -> str:
+    ins = {}
+    outs = {}
+    for attr in attrs.attrs:
+        match attr:
+            case NbOp_InTypeAttr(idx=int(idx), type=NbOp_Type(name=str(name))):
+                ins[idx] = name
+            case NbOp_OutTypeAttr(
+                idx=int(idx), type=NbOp_Type(name=str(name))
+            ):
+                outs[idx] = name
+            case _:
+                assert False
+
+    def format(dct):
+        if len(dct):
+            hi = max(dct.keys())
+            out = ", ".join(dct.get(i, "_") for i in range(hi + 1))
+            return f"({out})"
+        else:
+            return "()"
+
+    return format(ins) + "->" + format(outs)
+
+
+restructuring.format_attributes = my_attr_format
 
 
 class ExtendEGraphToRVSDG(EGraphToRVSDG):
     grammar = Grammar
 
     def handle_region_attributes(self, key: str, grm: Grammar):
+
+        def search_equiv_calls(self_key: str):
+            nodes = self.gdct["nodes"]
+            ecl = nodes[self_key]["eclass"]
+            for k, v in nodes.items():
+                children = v["children"]
+                if children and nodes[children[0]]["eclass"] == ecl:
+                    yield k, v
+
+        def get_types(key_arg):
+            typs = []
+            for k, v in search_equiv_calls(key_arg):
+                for j in self.search_eclass_siblings(k):
+                    op = self.gdct["nodes"][j]["op"]
+                    if op.startswith("Type."):
+                        typ = self.dispatch(j, grm)
+                        typs.append(typ)
+            return typs
+
         attrs = []
         typedargs = list(self.search_calls(key, "TypedIns"))
         if typedargs:
             [typedarg] = typedargs
             for key_arg in self.search_method_calls(typedarg, "arg"):
                 _k_self, k_idx = self.get_children(key_arg)
+                # get the idx in `.arg(idx)`
                 idx = self.dispatch(k_idx, grm)
+                typs = get_types(key_arg)
 
-                typs = list(
-                    self.filter_by_type(
-                        "Type", self.search_eclass_siblings(key_arg)
-                    )
-                )
                 if len(typs) == 1:
-                    typ = self.dispatch(typs[0], grm)
+                    typ = typs[0]
                     attrs.append(grm.write(NbOp_InTypeAttr(idx=idx, type=typ)))
                 else:
-                    assert len(typs) == 0, "multiple types"
+                    resolved = list(map(ase.pretty_str, typs))
+                    assert len(typs) == 0, f"multiple types: {resolved}"
 
         typedouts = list(self.search_calls(key, "TypedOuts"))
         if typedouts:
@@ -206,13 +276,9 @@ class ExtendEGraphToRVSDG(EGraphToRVSDG):
                 _k_self, k_idx = self.get_children(key_at)
                 idx = self.dispatch(k_idx, grm)
 
-                typs = list(
-                    self.filter_by_type(
-                        "Type", self.search_eclass_siblings(key_at)
-                    )
-                )
+                typs = get_types(key_at)
                 if len(typs) == 1:
-                    typ = self.dispatch(typs[0], grm)
+                    typ = typs[0]
                     attrs.append(
                         grm.write(NbOp_OutTypeAttr(idx=idx, type=typ))
                     )
@@ -224,7 +290,7 @@ class ExtendEGraphToRVSDG(EGraphToRVSDG):
     def handle_Type(
         self, key: str, op: str, children: dict | list, grm: Grammar
     ):
-        assert op == "Type"
+        assert op == "Type.simple"
         match children:
             case {"name": name}:
                 return grm.write(NbOp_Type(name))
@@ -235,20 +301,33 @@ class ExtendEGraphToRVSDG(EGraphToRVSDG):
 
             case "Nb_Gt_Int64", {"lhs": lhs, "rhs": rhs}:
                 return grm.write(NbOp_Gt_Int64(lhs=lhs, rhs=rhs))
+            case "Nb_Lt_Int64", {"lhs": lhs, "rhs": rhs}:
+                return grm.write(NbOp_Lt_Int64(lhs=lhs, rhs=rhs))
             case "Nb_Add_Int64", {"lhs": lhs, "rhs": rhs}:
                 return grm.write(NbOp_Add_Int64(lhs=lhs, rhs=rhs))
             case "Nb_Sub_Int64", {"lhs": lhs, "rhs": rhs}:
                 return grm.write(NbOp_Sub_Int64(lhs=lhs, rhs=rhs))
+            case "Nb_Not_Int64", {"operand": operand}:
+                return grm.write(NbOp_Not_Int64(operand=operand))
+            case "Nb_Undef_Int64", {}:
+                return grm.write(NbOp_Undef_Int64())
             case _:
                 # Use parent's implementation for other terms.
                 return super().handle_Term(op, children, grm)
 
 
 class MyCostModel(CostModel):
-    def get_cost_function(self, nodename, op, cost, nodes, child_costs):
+    def get_cost_function(self, nodename, op, ty, cost, nodes, child_costs):
         self_cost = None
+
         match op:
-            case "Nb_Add_Int64" | "Nb_Sub_Int64" | "Nb_Gt_Int64":
+            case (
+                "Nb_Add_Int64"
+                | "Nb_Sub_Int64"
+                | "Nb_Gt_Int64"
+                | "Nb_Lt_Int64"
+                | "Nb_Not_Int64"
+            ):
                 self_cost = 0.1
 
         if self_cost is not None:
@@ -256,27 +335,43 @@ class MyCostModel(CostModel):
 
         # Fallthrough to parent's cost function
         return super().get_cost_function(
-            nodename, op, cost, nodes, child_costs
+            nodename, op, ty, cost, nodes, child_costs
         )
 
 
-TypeInt64 = Type("Int64")
-TypeBool = Type("Bool")
+TypeInt64 = Type.simple("Int64")
+TypeBool = Type.simple("Bool")
 
 
 @ruleset
 def ruleset_type_infer_gt(io: Term, x: Term, y: Term, add: Term):
     yield rule(
         add == Py_GtIO(io, x, y),
-        TypeOf(x) == TypeInt64,
-        TypeOf(y) == TypeInt64,
+        TypeVar(x).getType() == TypeInt64,
+        TypeVar(y).getType() == TypeInt64,
     ).then(
         # convert to a typed operation
         union(add.getPort(1)).with_(Nb_Gt_Int64(x, y)),
         # shortcut io
         union(add.getPort(0)).with_(io),
         # output type
-        union(TypeOf(add.getPort(1))).with_(TypeBool),
+        set_(TypeVar(add.getPort(1)).getType()).to(TypeBool),
+    )
+
+
+@ruleset
+def ruleset_type_infer_lt(io: Term, x: Term, y: Term, add: Term):
+    yield rule(
+        add == Py_LtIO(io, x, y),
+        TypeVar(x).getType() == TypeInt64,
+        TypeVar(y).getType() == TypeInt64,
+    ).then(
+        # convert to a typed operation
+        union(add.getPort(1)).with_(Nb_Lt_Int64(x, y)),
+        # shortcut io
+        union(add.getPort(0)).with_(io),
+        # output type
+        set_(TypeVar(add.getPort(1)).getType()).to(TypeBool),
     )
 
 
@@ -284,15 +379,15 @@ def ruleset_type_infer_gt(io: Term, x: Term, y: Term, add: Term):
 def ruleset_type_infer_add(io: Term, x: Term, y: Term, add: Term):
     yield rule(
         add == Py_AddIO(io, x, y),
-        TypeOf(x) == TypeInt64,
-        TypeOf(y) == TypeInt64,
+        TypeVar(x).getType() == TypeInt64,
+        TypeVar(y).getType() == TypeInt64,
     ).then(
         # convert to a typed operation
         union(add.getPort(1)).with_(Nb_Add_Int64(x, y)),
         # shortcut io
         union(add.getPort(0)).with_(io),
         # output type
-        union(TypeOf(add.getPort(1))).with_(TypeInt64),
+        set_(TypeVar(add.getPort(1)).getType()).to(TypeInt64),
     )
 
 
@@ -300,21 +395,23 @@ def ruleset_type_infer_add(io: Term, x: Term, y: Term, add: Term):
 def ruleset_type_infer_sub(io: Term, x: Term, y: Term, add: Term):
     yield rule(
         add == Py_SubIO(io, x, y),
-        TypeOf(x) == TypeInt64,
-        TypeOf(y) == TypeInt64,
+        TypeVar(x).getType() == TypeInt64,
+        TypeVar(y).getType() == TypeInt64,
     ).then(
         # convert to a typed operation
         union(add.getPort(1)).with_(Nb_Sub_Int64(x, y)),
         # shortcut io
         union(add.getPort(0)).with_(io),
         # output type
-        union(TypeOf(add.getPort(1))).with_(TypeInt64),
+        set_(TypeVar(add.getPort(1)).getType()).to(TypeInt64),
     )
 
 
 @ruleset
 def ruleset_type_unify(ta: Type, tb: Type):
     yield rewrite(ta | tb, subsume=True).to(ta, ta == tb)
+    yield rewrite(Type.simple("undef") | tb, subsume=True).to(tb)
+    yield rewrite(ta | Type.simple("undef"), subsume=True).to(ta)
 
 
 @ruleset
@@ -338,8 +435,8 @@ def ruleset_propagate_typeof_ifelse(
         ),
         then_region.get(idx),
     ).then(
-        union(TypeOf(operands[idx])).with_(TypedIns(then_region).arg(idx)),
-        union(TypeOf(operands[idx])).with_(TypedIns(else_region).arg(idx)),
+        union(TypeVar(operands[idx])).with_(TypedIns(then_region).arg(idx)),
+        union(TypeVar(operands[idx])).with_(TypedIns(else_region).arg(idx)),
     )
 
     yield rule(
@@ -351,31 +448,31 @@ def ruleset_propagate_typeof_ifelse(
             orelse=Term.RegionEnd(region=_wc(Region), ports=else_ports),
             operands=TermList(operands),
         ),
-        ta := TypeOf(then_ports.getValue(idx)),
-        tb := TypeOf(else_ports.getValue(idx)),
+        ta := TypeVar(then_ports.getValue(idx)),
+        tb := TypeVar(else_ports.getValue(idx)),
     ).then(
-        union(ta | tb).with_(TypeOf(ifelse.getPort(idx))),
+        union(ta).with_(tb),
+        union(ta).with_(TypeVar(ifelse.getPort(idx))),
     )
 
 
 class TypedIns(Expr):
     def __init__(self, region: Region): ...
 
-    def arg(self, idx: i64Like) -> Type: ...
+    def arg(self, idx: i64Like) -> TypeVar: ...
 
 
 class TypedOuts(Expr):
     def __init__(self, region: Region): ...
 
-    def at(self, idx: i64Like) -> Type: ...
+    def at(self, idx: i64Like) -> TypeVar: ...
 
 
 @ruleset
 def ruleset_region_types(
     region: Region,
-    attrs: TypedIns,
     idx: i64,
-    typ: Type,
+    typ: TypeVar,
     term: Term,
     portlist: PortList,
 ):
@@ -384,15 +481,15 @@ def ruleset_region_types(
         typ == TypedIns(region).arg(idx),
         term == region.get(idx),
     ).then(
-        union(TypeOf(term)).with_(typ),
+        union(TypeVar(term)).with_(typ),
     )
 
     yield rule(
         # Outputs
         term == Term.RegionEnd(region=region, ports=portlist),
-        typ == TypeOf(portlist.getValue(idx)),
+        pv := portlist.getValue(idx),
     ).then(
-        union(TypedOuts(region).at(idx)).with_(typ),
+        union(TypedOuts(region).at(idx)).with_(TypeVar(pv)),
     )
 
 
@@ -403,7 +500,6 @@ def facts_function_types(
     reg_uid: String,
     fname: String,
     region: Region,
-    ret_term: Term,
 ):
     yield rule(
         GraphRoot(
@@ -415,8 +511,8 @@ def facts_function_types(
         ),
         region == Region(uid=reg_uid, inports=_wc(InPorts)),
     ).then(
-        union(TypedIns(region).arg(1)).with_(TypeInt64),
-        union(TypedIns(region).arg(2)).with_(TypeInt64),
+        set_(TypedIns(region).arg(1).getType()).to(TypeInt64),
+        set_(TypedIns(region).arg(2).getType()).to(TypeInt64),
     )
 
 
@@ -464,6 +560,8 @@ class Backend:
         match ty:
             case NbOp_Type("Int64"):
                 return ir.IntType(64)
+            case NbOp_Type("Bool"):
+                return ir.IntType(1)
         raise NotImplementedError(f"unknown type: {ty}")
 
     def lower_io_type(self):
@@ -550,11 +648,11 @@ class Backend:
                     builder.position_at_end(bb_endif)
                     assert len(value_then) == len(value_else)
                     phis = []
-                    for left, right in zip(
-                        value_then, value_else, strict=True
+                    for i, (left, right) in enumerate(
+                        zip(value_then, value_else, strict=True)
                     ):
                         assert left.type == right.type
-                        phi = builder.phi(left.type)
+                        phi = builder.phi(left.type, name=f"ifelse_{i}")
                         phi.add_incoming(left, bb_then_end)
                         phi.add_incoming(right, bb_else_end)
                         phis.append(phi)
@@ -568,6 +666,11 @@ class Backend:
                     rhs = yield rhs
                     return builder.icmp_signed(">", lhs, rhs)
 
+                case NbOp_Lt_Int64(lhs, rhs):
+                    lhs = yield lhs
+                    rhs = yield rhs
+                    return builder.icmp_signed("<", lhs, rhs)
+
                 case NbOp_Add_Int64(lhs, rhs):
                     lhs = yield lhs
                     rhs = yield rhs
@@ -578,10 +681,84 @@ class Backend:
                     rhs = yield rhs
                     return builder.sub(lhs, rhs)
 
+                ##### more
+
+                case NbOp_Undef_Int64():
+                    return ir.IntType(64)(ir.Undefined)
+
+                case rg.PyBool(val):
+                    return ir.IntType(1)(val)
+
+                case rg.PyInt(val):
+                    return ir.IntType(64)(val)
+
+                case NbOp_Not_Int64(operand):
+                    opval = yield operand
+                    return builder.icmp_unsigned("==", opval, opval.type(0))
+
+                case rg.Loop(body=rg.RegionEnd() as body, operands=operands):
+                    # process operands
+                    ops = []
+                    for op in operands:
+                        ops.append((yield op))
+
+                    # Note this is a tail loop.
+                    begin = body.begin
+
+                    with push(*ops):
+                        loopentry_values = yield begin
+
+                    bb_before = builder.basic_block
+                    bb_loopbody = builder.append_basic_block("loopbody")
+                    bb_endloop = builder.append_basic_block("endloop")
+                    builder.branch(bb_loopbody)
+                    # loop body
+                    builder.position_at_end(bb_loopbody)
+                    # setup phi nodes for loopback variables
+
+                    phis = []
+                    for i, var in enumerate(loopentry_values):
+                        phi = builder.phi(var.type, name=f"loop_{i}")
+                        phi.add_incoming(var, bb_before)
+                        phis.append(phi)
+
+                    # generate body
+                    loop_memo = {begin: tuple(phis)}
+                    memo = ase.traverse(
+                        body,
+                        lower_expr,
+                        init_memo=loop_memo,
+                    )
+
+                    loopout_values = list(memo[body])
+                    # get loop condition
+                    loopcond = loopout_values.pop(0)
+
+                    # fix up phis
+                    for i, phi in enumerate(phis):
+                        assert phi.type == loopout_values[i].type, (
+                            phi.type,
+                            loopout_values[i].type,
+                        )
+                        phi.add_incoming(
+                            loopout_values[i], builder.basic_block
+                        )
+                    # back jump
+                    builder.cbranch(loopcond, bb_loopbody, bb_endloop)
+                    # end loop
+                    builder.position_at_end(bb_endloop)
+                    # Returns the value from the loop body because this is a tail loop
+                    return loopout_values
+
             raise NotImplementedError(expr)
 
-        with push(iostate, *fn.args):
-            memo = ase.traverse(root.body, lower_expr)
+        try:
+            with push(iostate, *fn.args):
+                memo = ase.traverse(root.body, lower_expr)
+        except:
+            print(mod)
+            raise
+
         func_region_outs = memo[root.body]
 
         i, p = get_port_by_name(root.body.ports, rvsdg.internal_prefix("ret"))
@@ -639,8 +816,9 @@ def example(a, b):
     return z - a
 
 
+Int64 = NbOp_Type("Int64")
+
 if __name__ == "__main__":
-    Int64 = NbOp_Type("Int64")
     jt = compiler_pipeline(
         example,
         argtypes=(Int64, Int64),
@@ -649,6 +827,7 @@ if __name__ == "__main__":
             | ruleset_propagate_typeof_ifelse
             | ruleset_type_unify
             | ruleset_type_infer_gt
+            | ruleset_type_infer_lt
             | ruleset_type_infer_add
             | ruleset_type_infer_sub
             | ruleset_region_types
