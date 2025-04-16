@@ -41,5 +41,6 @@ $(PAGES_SUBDIR)/%.html: %.ipynb $(PAGES_SUBDIR)
 clean:
 	rm -f $(IPYNB_FILES)
 	rm -f $(HTML_FILES)
+	rm -df $(PAGES_SUBDIR)
 
 .PHONE: all sync dump
