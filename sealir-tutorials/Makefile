@@ -35,10 +35,12 @@ $(PAGES_SUBDIR):
 
 # Pattern rule to convert .ipynb files to rendered .html
 $(PAGES_SUBDIR)/%.html: %.ipynb $(PAGES_SUBDIR)
-	jupyter nbconvert --to html --output=$@ $<
+	jupyter nbconvert --execute --to html --output=$@ $<
 
-# Clean target to remove generated notebooks
+# Clean target to remove generated notebooks and rendered HTML
 clean:
-	rm -rf *.ipynb
+	rm -f $(IPYNB_FILES)
+	rm -f $(HTML_FILES)
+	rm -df $(PAGES_SUBDIR)
 
 .PHONE: all sync dump
