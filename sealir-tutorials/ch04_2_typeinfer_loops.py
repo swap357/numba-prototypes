@@ -19,75 +19,58 @@
 
 from __future__ import annotations
 
-import ctypes
-from contextlib import contextmanager
-from dataclasses import dataclass
-from typing import Any, Callable, Sequence
-
 from egglog import (
     Bool,
-    EGraph,
-    Expr,
     String,
-    StringLike,
     Unit,
     Vec,
     function,
     i64,
     i64Like,
-    rewrite,
     rule,
     ruleset,
     set_,
     union,
 )
-from llvmlite import binding as llvm
 from llvmlite import ir
-from sealir import ase, grammar, rvsdg
-from sealir.eqsat.py_eqsat import Py_AddIO, Py_GtIO, Py_NotIO, Py_SubIO
+from sealir import ase
+from sealir.eqsat.py_eqsat import Py_NotIO
 from sealir.eqsat.rvsdg_eqsat import (
-    GraphRoot,
-    InPorts,
-    Port,
     PortList,
     Region,
     Term,
     TermList,
     i64,
-    wildcard,
-)
-from sealir.eqsat.rvsdg_extract import (
-    CostModel,
-    EGraphToRVSDG,
 )
 from sealir.rvsdg import grammar as rg
 
 from ch03_egraph_program_rewrites import (
-    frontend,
     run_test,
 )
+from ch04_1_typeinfer_controlflow import Backend as Ch04_1_Backend
 from ch04_1_typeinfer_controlflow import (
-    Backend,
-    ExtendEGraphToRVSDG,
+    ExtendEGraphToRVSDG as _ch04_1_ExtendEGraphToRVSDG,
+)
+from ch04_1_typeinfer_controlflow import (
+    Grammar,
     Int64,
     MyCostModel,
+    NbOp_Base,
+    SExpr,
     Type,
     TypeBool,
     TypedIns,
     TypeInt64,
     TypeVar,
     _wc,
-    basic_ruleset,
+    base_ruleset,
     compiler_pipeline,
     facts_function_types,
-    ruleset_propagate_typeof_ifelse,
-    ruleset_region_types,
-    ruleset_type_infer_add,
-    ruleset_type_infer_gt,
-    ruleset_type_infer_lt,
-    ruleset_type_infer_sub,
-    ruleset_type_unify,
+    ruleset_type_infer_failure_report,
+    ruleset_type_infer_float,
 )
+
+# Define type inference for loop regions:
 
 
 @function
@@ -110,6 +93,7 @@ def ruleset_propagate_typeof_loops(
     region: Region,
     start: i64,
     stop: i64,
+    ty: Type,
 ):
     yield rule(
         loop == Term.Loop(body=body, operands=TermList(operands)),
@@ -138,14 +122,16 @@ def ruleset_propagate_typeof_loops(
     yield rule(
         assign_output_loop_typevar(start, stop, ports, operands, loop),
         start > 0,
+        ty == TypeVar(ports.getValue(start)).getType(),
     ).then(
-        union(TypeVar(ports.getValue(start))).with_(
-            TypeVar(operands[start - 1])
-        ),
+        set_(TypeVar(operands[start - 1]).getType()).to(ty),
         union(TypeVar(ports.getValue(start))).with_(
             TypeVar(loop.getPort(start - 1))
         ),
     )
+
+
+# Define rulesets for extra operations needed:
 
 
 @function
@@ -174,9 +160,7 @@ def ruleset_others(x: Term, y: Term, io: Term):
     yield rule(
         x == Term.Undef(_wc(String)),
         TypeVar(x).getType() == TypeBool,
-    ).then(
-        union(x).with_(Term.LiteralBool(False))
-    )
+    ).then(union(x).with_(Term.LiteralBool(False)))
     yield rule(
         y == Py_NotIO(io=io, term=x),
         TypeVar(x).getType() == TypeInt64,
@@ -187,11 +171,104 @@ def ruleset_others(x: Term, y: Term, io: Term):
     )
 
 
+class NbOp_Not_Int64(NbOp_Base):
+    operand: SExpr
+
+
+class NbOp_Undef_Int64(NbOp_Base): ...
+
+
+# Extend EGraphToRVSDG conversion from Ch4.1 to handle the extra operations
+
+
+class ExtendEGraphToRVSDG(_ch04_1_ExtendEGraphToRVSDG):
+
+    def handle_Term(self, op: str, children: dict | list, grm: Grammar):
+        match op, children:
+            case "Nb_Not_Int64", {"operand": operand}:
+                return grm.write(NbOp_Not_Int64(operand=operand))
+            case "Nb_Undef_Int64", {}:
+                return grm.write(NbOp_Undef_Int64())
+        return super().handle_Term(op, children, grm)
+
+
+# Extend the LLVM Backend from Ch4.1
+
+
+class Backend(Ch04_1_Backend):
+
+    def lower_expr(self, expr, state):
+        builder = state.builder
+        match expr:
+
+            case rg.Loop(body=rg.RegionEnd() as body, operands=operands):
+                # process operands
+                ops = []
+                for op in operands:
+                    ops.append((yield op))
+
+                # Note this is a tail loop.
+                begin = body.begin
+
+                with state.push(*ops):
+                    loopentry_values = yield begin
+
+                bb_before = builder.basic_block
+                bb_loopbody = builder.append_basic_block("loopbody")
+                bb_endloop = builder.append_basic_block("endloop")
+                builder.branch(bb_loopbody)
+                # loop body
+                builder.position_at_end(bb_loopbody)
+                # setup phi nodes for loopback variables
+
+                phis = []
+                for i, var in enumerate(loopentry_values):
+                    phi = builder.phi(var.type, name=f"loop_{i}")
+                    phi.add_incoming(var, bb_before)
+                    phis.append(phi)
+
+                # generate body
+                loop_memo = {begin: tuple(phis)}
+                memo = ase.traverse(
+                    body,
+                    self.lower_expr,
+                    state=state,
+                    init_memo=loop_memo,
+                )
+
+                loopout_values = list(memo[body])
+                # get loop condition
+                loopcond = loopout_values.pop(0)
+
+                # fix up phis
+                for i, phi in enumerate(phis):
+                    assert phi.type == loopout_values[i].type, (
+                        phi.type,
+                        loopout_values[i].type,
+                    )
+                    phi.add_incoming(loopout_values[i], builder.basic_block)
+                # back jump
+                builder.cbranch(loopcond, bb_loopbody, bb_endloop)
+                # end loop
+                builder.position_at_end(bb_endloop)
+                # Returns the value from the loop body because this is a tail loop
+                return loopout_values
+
+            case NbOp_Not_Int64(operand):
+                opval = yield operand
+                return builder.icmp_unsigned("==", opval, opval.type(0))
+
+            case NbOp_Undef_Int64():
+                return ir.IntType(64)(ir.Undefined)
+
+        return (yield from super().lower_expr(expr, state))
+
+
 def example(init, n):
-    c = init
+    c = float(init)
     i = 0
     while i < n:
-        c = c + i
+        c = c + float(i)
         i = i + 1
     return c
 
@@ -201,22 +278,16 @@ if __name__ == "__main__":
         example,
         argtypes=(Int64, Int64),
         ruleset=(
-            basic_ruleset
-            | ruleset_propagate_typeof_ifelse
-            | ruleset_propagate_typeof_loops
-            | ruleset_type_unify
-            | ruleset_type_infer_gt
-            | ruleset_type_infer_lt
-            | ruleset_type_infer_add
-            | ruleset_type_infer_sub
-            | ruleset_region_types
+            base_ruleset
             | facts_function_types
             | ruleset_others
+            | ruleset_propagate_typeof_loops
+            | ruleset_type_infer_float
+            | ruleset_type_infer_failure_report
         ),
         verbose=True,
         converter_class=ExtendEGraphToRVSDG,
         cost_model=MyCostModel(),
         backend=Backend(),
     )
-    print(example(10, 7))
     run_test(example, jt, (10, 7), verbose=True)

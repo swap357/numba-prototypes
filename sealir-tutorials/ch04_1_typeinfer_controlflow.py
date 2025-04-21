@@ -21,30 +21,48 @@
 from __future__ import annotations
 
 import ctypes
+import operator
 from contextlib import contextmanager
 from dataclasses import dataclass
+from functools import partial
+from traceback import print_exception
 from typing import Any, Callable, Sequence
 
 from egglog import (
+    Bool,
     EGraph,
     Expr,
+    Ruleset,
     String,
     StringLike,
+    Unit,
     Vec,
+    eq,
     function,
     i64,
     i64Like,
+    join,
     method,
+    ne,
     rewrite,
     rule,
     ruleset,
     set_,
     union,
+    vars_,
 )
 from llvmlite import binding as llvm
 from llvmlite import ir
 from sealir import ase, grammar, rvsdg
-from sealir.eqsat.py_eqsat import Py_AddIO, Py_GtIO, Py_LtIO, Py_SubIO
+from sealir.eqsat.py_eqsat import (
+    Py_AddIO,
+    Py_Call,
+    Py_DivIO,
+    Py_GtIO,
+    Py_LoadGlobal,
+    Py_LtIO,
+    Py_SubIO,
+)
 from sealir.eqsat.rvsdg_eqsat import (
     GraphRoot,
     InPorts,
@@ -53,12 +71,12 @@ from sealir.eqsat.rvsdg_eqsat import (
     Region,
     Term,
     TermList,
-    i64,
     wildcard,
 )
 from sealir.eqsat.rvsdg_extract import (
     CostModel,
     EGraphToRVSDG,
+    ExtractionError,
 )
 from sealir.rvsdg import grammar as rg
 
@@ -72,39 +90,438 @@ from ch04_0_typeinfer_scalar import (
 )
 from utils import IN_NOTEBOOK
 
+_wc = wildcard
+
+# ## Defining Types
+# First we'll define the `Type` and `TypeVar` in the EGraph.
+
+
+# ### `Type`
+# `Type` is the actual type. A simple type will just be identified by its name.
+# The only operation that it has is `|` for unifying two types.
+# For simplicity, we will actually forbid unifying types so that will not be
+# any implicit casting.
+
+
+class Type(Expr):
+    @classmethod
+    def simple(self, name: StringLike) -> Type:
+        "Construct a Type with name"
+        ...
+
+    def __or__(self, other: Type) -> Type:
+        "Unify with other Type"
+        ...
+
+
+TypeInt64 = Type.simple("Int64")
+TypeBool = Type.simple("Bool")
+TypeFloat64 = Type.simple("Float64")
+
+
+if __name__ == "__main__":
+    print("Valid types:")
+    print(TypeInt64)
+    print(TypeBool)
+    print(TypeFloat64)
+    print("The following will not be allowed:")
+    print(TypeInt64 | TypeFloat64)
+
+
+# Let's define some rules that will establish the above facts:
+
+
+@function
+def failed_to_unify(ty: Type) -> Unit: ...
+
+
+@function
+def is_valid_type(ty: Type) -> Unit: ...
+
+
+@ruleset
+def ruleset_type_basic(
+    ta: Type,
+    tb: Type,
+    name: String,
+    ty: Type,
+):
+    # If ta == tb. then ta
+    yield rewrite(ta | tb, subsume=True).to(ta, ta == tb)
+    # If undef | tb, then tb
+    yield rewrite(Type.simple("undef") | tb, subsume=True).to(tb)
+    # If ta | undef, then ta
+    yield rewrite(ta | Type.simple("undef"), subsume=True).to(ta)
+
+    # Identify valid type
+    yield rule(
+        ty == Type.simple(name),
+        ne(name).to(String("undef")),
+    ).then(is_valid_type(ty))
+
+    # Identify errors
+    yield rule(
+        # If both sides are valid types and not equal, then fail
+        ty == ta | tb,
+        is_valid_type(ta),
+        is_valid_type(tb),
+        ne(ta).to(tb),  # ta != tb
+    ).then(failed_to_unify(ty))
+
+
+if __name__ == "__main__":
+    eg = EGraph()
+    eg.register(TypeInt64)
+    eg.register(TypeBool)
+    eg.register(TypeFloat64)
+    eg.register(TypeInt64 | TypeFloat64)
+    eg.register(TypeInt64 | Type.simple("undef"))
+    print("First run")
+    eg.run(ruleset_type_basic)
+    if IN_NOTEBOOK:
+        eg.display(graphviz=True)
+    print("Second run")
+    eg.run(ruleset_type_basic)
+    if IN_NOTEBOOK:
+        eg.display(graphviz=True)
+
+
+# Observe:
+# - `failed_to_unify()` only appears in the second run because it depends on the
+#   information from the first.
+
+# ### `TypeVar`
+# A type variable for associating program terms and their type.
+# Later on, we will merge type variables that are associating with
+# different terms. This is needed for the unification of values after a
+# conditional branch (if-else).
+
+
+class TypeVar(Expr):
+    def __init__(self, term: Term):
+        "Create a TypeVar for a Term"
+        ...
+
+    @method(merge=lambda x, y: x | y)
+    def getType(self) -> Type:
+        """Get the type for this TypeVar.
+
+        Multiple definitions will be merged by Type.__or__, causing a
+        unification.
+        """
+
+
+# ## Handling type inference errors
+# Type inference can fail, so we must provide a mechanism for reporting errors.
+
+# ### `ErrorMsg`
+# We'll define a `ErrorMsg` class in the egraph to capture all the error
+# message. The compilation will always start with `ErrorMsg.root()` in the
+# EGraph. When type inference encounters an error, That root node will be
+# merged with `ErroMsg.fail()` nodes.
+
+
+class ErrorMsg(Expr):
+    @classmethod
+    def root(cls) -> ErrorMsg:
+        "The empty root"
+        ...
+
+    @classmethod
+    def fail(cls, msg: String) -> ErrorMsg:
+        "A node for failure message"
+        ...
+
+    @method(preserve=True)
+    def eval(self) -> tuple[str, tuple]:
+        """
+        This is for converting the information in the EGraph back to
+        Python. This will parse the EGraph node to extract the message string.
+        """
+        from egglog.builtins import ClassMethodRef, _extract_call
+
+        call = _extract_call(self)
+        if isinstance(call.callable, ClassMethodRef):
+            assert call.callable.class_name == "ErrorMsg"
+            args = [self.__with_expr__(x).eval() for x in call.args]
+            return call.callable.method_name, tuple(args)
+        raise TypeError
+
+
+# Helpers to process the error message
+
+
+def get_error_message(err_info: tuple[str, tuple]) -> str:
+    "Helper to process the result of ErrorMsg.eval()"
+    match err_info:
+        case "fail", (msg,):
+            return msg
+        case _:
+            raise NotImplementedError
+
+
+# For example
+
+if __name__ == "__main__":
+    root = ErrorMsg.root()
+    eg = EGraph()
+    eg.register(
+        union(root).with_(ErrorMsg.fail("I failed")),
+        union(root).with_(ErrorMsg.fail("Failed again")),
+    )
+    if IN_NOTEBOOK:
+        eg.display(graphviz=True)
+    msgs = eg.extract_multiple(root, n=3)
+    print(msgs)
+    for msg in msgs:
+        print(msg.eval())
+        try:
+            print(get_error_message(msg.eval()))
+        except NotImplementedError:
+            print("no msg")
+
+
+# ## Typing addition
+# Given a function:
+
+
+def example_0(a, b):
+    return a + b
+
+
+# To implement the addition, we define the operation as an egraph functions:
+
+# Int64 + Int64 -> Int64
+
+
+@function
+def Nb_Add_Int64(lhs: Term, rhs: Term) -> Term: ...
+
+
+# Float64 + Float64 -> Float64
+
+
+@function
+def Nb_Add_Float64(lhs: Term, rhs: Term) -> Term: ...
+
+
+# Helper for binary operations
+
+
+def make_rule_for_binop(binop, lhs_type, rhs_type, typedop, res_type):
+    io, lhs, rhs, op = vars_("io lhs rhs op", Term)
+    return rule(
+        op == binop(io, lhs, rhs),
+        TypeVar(lhs).getType() == lhs_type,
+        TypeVar(rhs).getType() == rhs_type,
+    ).then(
+        # convert to a typed operation
+        union(op.getPort(1)).with_(typedop(lhs, rhs)),
+        # shortcut io
+        union(op.getPort(0)).with_(io),
+        # output type
+        set_(TypeVar(op.getPort(1)).getType()).to(res_type),
+    )
+
+
+# Define addition
+
+
+@ruleset
+def ruleset_type_infer_add():
+    # Int64 + Int64 -> Int64
+    yield make_rule_for_binop(
+        Py_AddIO, TypeInt64, TypeInt64, Nb_Add_Int64, TypeInt64
+    )
+    # Float64 + Float64 -> Float64
+    yield make_rule_for_binop(
+        Py_AddIO, TypeFloat64, TypeFloat64, Nb_Add_Float64, TypeFloat64
+    )
+
+
+# Define argument types and their propagations:
+
+
+@ruleset
+def facts_function_types(
+    outports: Vec[Port],
+    func_uid: String,
+    reg_uid: String,
+    fname: String,
+    region: Region,
+):
+    yield rule(
+        # This match the function at graph root
+        GraphRoot(
+            Term.Func(
+                body=Term.RegionEnd(region=region, ports=PortList(outports)),
+                uid=func_uid,
+                fname=fname,
+            )
+        ),
+        region == Region(uid=reg_uid, inports=_wc(InPorts)),
+    ).then(
+        # The first argument is Int64
+        set_(TypedIns(region).arg(1).getType()).to(TypeInt64),
+        # The second argument is Int64
+        set_(TypedIns(region).arg(2).getType()).to(TypeInt64),
+    )
+
+
+# Associate type variables to region inputs/outputs.
+
+
+class TypedIns(Expr):
+    def __init__(self, region: Region): ...
+
+    def arg(self, idx: i64Like) -> TypeVar: ...
+
+
+class TypedOuts(Expr):
+    def __init__(self, region: Region): ...
+
+    def at(self, idx: i64Like) -> TypeVar: ...
+
+
+@ruleset
+def ruleset_region_types(
+    region: Region,
+    idx: i64,
+    typ: TypeVar,
+    term: Term,
+    portlist: PortList,
+):
+    # Propagate region types
+    yield rule(
+        # Inputs
+        typ == TypedIns(region).arg(idx),
+        term == region.get(idx),
+    ).then(
+        union(TypeVar(term)).with_(typ),
+    )
+
+    yield rule(
+        # Outputs
+        term == Term.RegionEnd(region=region, ports=portlist),
+        pv := portlist.getValue(idx),
+    ).then(
+        union(TypedOuts(region).at(idx)).with_(TypeVar(pv)),
+    )
+
+
+if __name__ == "__main__":
+    rvsdg_expr, dbginfo = frontend(example_0)
+    print(rvsdg.format_rvsdg(rvsdg_expr))
+
+    def define_egraph(
+        egraph: EGraph,
+        func: SExpr,
+    ):
+        egraph.let("root", GraphRoot(func))
+        rules = (
+            basic_ruleset
+            | ruleset_region_types
+            | ruleset_type_basic
+            | ruleset_type_infer_add
+            | facts_function_types
+        )
+        egraph.run(rules.saturate())
+        if IN_NOTEBOOK:
+            egraph.display(graphviz=True)
+
+        # Make sure the operation is in the graph
+        assert "Nb_Add_Int64" in str(egraph.extract(GraphRoot(func)))
+
+        raise AssertionError("stop early")
+
+    try:
+        middle_end(
+            rvsdg_expr,
+            define_egraph,
+            converter_class=EGraphToRVSDG,
+            cost_model=None,
+        )
+    except AssertionError as e:
+        assert str(e) == "stop early"
+
+
+# The above compilation have to stop early because we haven't implemented the
+# conversions of `Nb_Add_Int64` back into RVSDG.
+
+# ## Extend the rest of the compiler
+
+
+# ### A more extensible compiler pipeline
+# We'll need a more extensible compiler pipeline so capability can be added
+# later.
+
+
+class CompilationError(Exception):
+    pass
+
 
 def compiler_pipeline(
     fn,
     argtypes,
     *,
     verbose=False,
-    ruleset,
+    ruleset: Ruleset,
     converter_class=EGraphToRVSDG,
     cost_model=None,
     backend,
 ):
+
     rvsdg_expr, dbginfo = frontend(fn)
 
+    print("Before EGraph".center(80, "="))
+    print(format_rvsdg(rvsdg_expr))
+
     # Middle end
-    def define_egraph(egraph: EGraph, func):
+    def define_egraph(
+        egraph: EGraph,
+        func: SExpr,
+    ):
+        # Define graph root that points to the function
         root = GraphRoot(func)
         egraph.let("root", root)
 
+        # Define the empty root node for the error messages
+        errors = ErrorMsg.root()
+        egraph.let("errors", errors)
+
+        # Run all the rules until saturation
         egraph.run(ruleset.saturate())
+
         if verbose and IN_NOTEBOOK:
             # For inspecting the egraph
             egraph.display(graphviz=True)
-        # egraph.display()
 
-    cost, extracted = middle_end(
-        rvsdg_expr,
-        define_egraph,
-        converter_class=converter_class,
-        cost_model=cost_model,
-    )
+        # Use egglog's default extractor to get the error messages
+        errmsgs = map(
+            lambda x: x.eval(), egraph.extract_multiple(errors, n=10)
+        )
+        errmsgs_filtered = [
+            get_error_message((meth, args))
+            for meth, args in errmsgs
+            if meth != "root"
+        ]
+        if errmsgs_filtered:
+            # Raise CompilationError if there are compiler errors
+            raise CompilationError("\n".join(errmsgs_filtered))
+
+    try:
+        cost, extracted = middle_end(
+            rvsdg_expr,
+            define_egraph,
+            converter_class=converter_class,
+            cost_model=cost_model,
+        )
+    except ExtractionError as e:
+        raise CompilationError("extraction failed") from e
+
     print("Extracted from EGraph".center(80, "="))
     print("cost =", cost)
-    print(rvsdg.format_rvsdg(extracted))
+    print(format_rvsdg(extracted))
 
     llmod = backend.lower(extracted, argtypes)
     if verbose:
@@ -113,42 +530,194 @@ def compiler_pipeline(
     return backend.jit_compile(llmod, extracted)
 
 
-_wc = wildcard
-
-
-class Type(Expr):
-    @classmethod
-    def simple(self, name: StringLike) -> Type: ...
-
-    def __or__(self, other: Type) -> Type: ...
-
-
-class TypeVar(Expr):
-    def __init__(self, term: Term): ...
-
-    @method(merge=lambda x, y: x | y)
-    def getType(self) -> Type: ...
+# Define EGraph functions for new operations:
 
 
 @function
 def Nb_Gt_Int64(lhs: Term, rhs: Term) -> Term: ...
-
-
 @function
 def Nb_Lt_Int64(lhs: Term, rhs: Term) -> Term: ...
-
-
-@function
-def Nb_Add_Int64(lhs: Term, rhs: Term) -> Term: ...
-
-
 @function
 def Nb_Sub_Int64(lhs: Term, rhs: Term) -> Term: ...
+@function
+def Nb_Sub_Float64(lhs: Term, rhs: Term) -> Term: ...
+@function
+def Nb_Div_Int64(lhs: Term, rhs: Term) -> Term: ...
+@function
+def Nb_CastI64ToF64(operand: Term) -> Term: ...
+@function
+def Nb_CastToFloat(arg: Term) -> Term: ...
+
+
+# Define rules for the operations:
+
+
+@ruleset
+def ruleset_type_infer_gt(io: Term, x: Term, y: Term, op: Term):
+    yield make_rule_for_binop(
+        Py_GtIO, TypeInt64, TypeInt64, Nb_Gt_Int64, TypeBool
+    )
+
+
+@ruleset
+def ruleset_type_infer_lt(io: Term, x: Term, y: Term, op: Term):
+    yield make_rule_for_binop(
+        Py_LtIO, TypeInt64, TypeInt64, Nb_Lt_Int64, TypeBool
+    )
+
+
+@ruleset
+def ruleset_type_infer_sub(io: Term, x: Term, y: Term, op: Term):
+    yield make_rule_for_binop(
+        Py_SubIO, TypeInt64, TypeInt64, Nb_Sub_Int64, TypeInt64
+    )
+
+    yield make_rule_for_binop(
+        Py_SubIO, TypeFloat64, TypeFloat64, Nb_Sub_Float64, TypeFloat64
+    )
+
+
+##
+# @ruleset
+# def ruleset_type_infer_sub_promote(io: Term, x: Term, y: Term, op: Term):
+#     # # Promote to float if one side is float
+#     yield rule(
+#         op == Py_SubIO(io, x, y),
+#         TypeVar(x).getType() == TypeInt64,
+#         TypeVar(y).getType() == TypeFloat64,
+#     ).then(
+#         union(op).with_(Py_SubIO(io, Nb_CastI64ToF64(x), y)),
+#     )
+#
+#     yield rule(
+#         op == Py_SubIO(io, x, y),
+#         TypeVar(x).getType() == TypeFloat64,
+#         TypeVar(y).getType() == TypeInt64,
+#     ).then(
+#         union(op).with_(Py_SubIO(io, x, Nb_CastI64ToF64(y))),
+#         subsume(Py_SubIO(io, x, y)),
+#     )
+@ruleset
+def ruleset_type_infer_literals(op: Term, ival: i64):
+    yield rule(op == Term.LiteralI64(ival)).then(
+        set_(TypeVar(op).getType()).to(TypeInt64)
+    )
+
+
+@ruleset
+def ruleset_typeinfer_cast(op: Term, val: Term):
+    yield rule(
+        op == Nb_CastI64ToF64(val),
+        TypeVar(val).getType() == TypeInt64,
+    ).then(
+        set_(TypeVar(op).getType()).to(TypeFloat64),
+    )
+
+
+@ruleset
+def ruleset_type_infer_div(io: Term, x: Term, y: Term, op: Term):
+    yield rule(
+        op == Py_DivIO(io, x, y),
+        TypeVar(x).getType() == TypeInt64,
+        TypeVar(y).getType() == TypeInt64,
+    ).then(
+        # convert to a typed operation
+        union(op.getPort(1)).with_(Nb_Div_Int64(x, y)),
+        # shortcut io
+        union(op.getPort(0)).with_(io),
+        # output type
+        set_(TypeVar(op.getPort(1)).getType()).to(TypeFloat64),
+    )
+
+
+@ruleset
+def ruleset_type_infer_float(
+    io: Term, loadglb: Term, callstmt: Term, args: Vec[Term], arg: Term
+):
+    yield rule(
+        # Convert Python float(arg)
+        loadglb == Py_LoadGlobal(io=_wc(Term), name="float"),
+        callstmt == Py_Call(io=io, func=loadglb, args=TermList(args)),
+        eq(args.length()).to(i64(1)),
+    ).then(
+        union(callstmt.getPort(1)).with_(Nb_CastToFloat(args[0])),
+        union(callstmt.getPort(0)).with_(io),
+    )
+    # Type check and specialize
+    yield rewrite(
+        Nb_CastToFloat(arg),
+        subsume=True,
+    ).to(
+        Nb_CastI64ToF64(arg),
+        # given
+        TypeVar(arg).getType() == TypeInt64,
+    )
+
+
+# Rules for type-inference on if-else
+
+# Most of the logic is just propagation. The key is merging the the type at
+# the output ports of the IfElse regions
+
+
+@ruleset
+def ruleset_propagate_typeof_ifelse(
+    then_region: Region,
+    else_region: Region,
+    idx: i64,
+    ifelse: Term,
+    then_ports: PortList,
+    else_ports: PortList,
+    operands: Vec[Term],
+    vecport: Vec[Port],
+    tv: TypeVar,
+    term: Term,
+    term2: Term,
+    name: String,
+    ty: Type,
+    ta: Type,
+    tb: Type,
+):
+
+    yield rule(
+        # Propagate operand types into the contained regions
+        Term.IfElse(
+            cond=_wc(Term),
+            then=Term.RegionEnd(region=then_region, ports=_wc(PortList)),
+            orelse=Term.RegionEnd(region=else_region, ports=_wc(PortList)),
+            operands=TermList(operands),
+        ),
+        then_region.get(idx),
+    ).then(
+        union(TypeVar(operands[idx])).with_(TypedIns(then_region).arg(idx)),
+        union(TypeVar(operands[idx])).with_(TypedIns(else_region).arg(idx)),
+    )
+
+    yield rule(
+        # Propagate output types from the contained regions
+        ifelse
+        == Term.IfElse(
+            cond=_wc(Term),
+            then=Term.RegionEnd(region=_wc(Region), ports=then_ports),
+            orelse=Term.RegionEnd(region=_wc(Region), ports=else_ports),
+            operands=TermList(operands),
+        ),
+        ta == TypeVar(then_ports.getValue(idx)).getType(),
+        tb == TypeVar(else_ports.getValue(idx)).getType(),
+    ).then(
+        # Output type variable cannot exist until both side of the branches
+        # are typed.
+        set_(TypeVar(ifelse.getPort(idx)).getType()).to(ta | tb)
+    )
 
 
 SExpr = rvsdg.grammar.SExpr
 
 
+# Extend RVSDG Grammar for the new operations
+
+
+# +
 class NbOp_Base(grammar.Rule):
     pass
 
@@ -182,23 +751,37 @@ class NbOp_Add_Int64(NbOp_Base):
     rhs: SExpr
 
 
+class NbOp_Add_Float64(NbOp_Base):
+    lhs: SExpr
+    rhs: SExpr
+
+
 class NbOp_Sub_Int64(NbOp_Base):
     lhs: SExpr
     rhs: SExpr
 
 
-class NbOp_Not_Int64(NbOp_Base):
+class NbOp_Sub_Float64(NbOp_Base):
+    lhs: SExpr
+    rhs: SExpr
+
+
+class NbOp_Div_Int64(NbOp_Base):
+    lhs: SExpr
+    rhs: SExpr
+
+
+class NbOp_CastI64ToF64(NbOp_Base):
     operand: SExpr
-
-
-class NbOp_Undef_Int64(NbOp_Base): ...
 
 
 class Grammar(grammar.Grammar):
     start = rvsdg.Grammar.start | NbOp_Base
 
 
-from sealir.rvsdg import restructuring
+# -
+
+# Define attribute formating
 
 
 def my_attr_format(attrs: rg.Attrs) -> str:
@@ -226,7 +809,11 @@ def my_attr_format(attrs: rg.Attrs) -> str:
     return format(ins) + "->" + format(outs)
 
 
-restructuring.format_attributes = my_attr_format
+# +
+format_rvsdg = partial(rvsdg.format_rvsdg, format_attrs=my_attr_format)
+
+
+# Extend EGraph to RVSDG
 
 
 class ExtendEGraphToRVSDG(EGraphToRVSDG):
@@ -298,40 +885,35 @@ class ExtendEGraphToRVSDG(EGraphToRVSDG):
 
     def handle_Term(self, op: str, children: dict | list, grm: Grammar):
         match op, children:
-
             case "Nb_Gt_Int64", {"lhs": lhs, "rhs": rhs}:
                 return grm.write(NbOp_Gt_Int64(lhs=lhs, rhs=rhs))
             case "Nb_Lt_Int64", {"lhs": lhs, "rhs": rhs}:
                 return grm.write(NbOp_Lt_Int64(lhs=lhs, rhs=rhs))
             case "Nb_Add_Int64", {"lhs": lhs, "rhs": rhs}:
                 return grm.write(NbOp_Add_Int64(lhs=lhs, rhs=rhs))
+            case "Nb_Add_Float64", {"lhs": lhs, "rhs": rhs}:
+                return grm.write(NbOp_Add_Float64(lhs=lhs, rhs=rhs))
             case "Nb_Sub_Int64", {"lhs": lhs, "rhs": rhs}:
                 return grm.write(NbOp_Sub_Int64(lhs=lhs, rhs=rhs))
-            case "Nb_Not_Int64", {"operand": operand}:
-                return grm.write(NbOp_Not_Int64(operand=operand))
-            case "Nb_Undef_Int64", {}:
-                return grm.write(NbOp_Undef_Int64())
+            case "Nb_Sub_Float64", {"lhs": lhs, "rhs": rhs}:
+                return grm.write(NbOp_Sub_Float64(lhs=lhs, rhs=rhs))
+            case "Nb_Div_Int64", {"lhs": lhs, "rhs": rhs}:
+                return grm.write(NbOp_Div_Int64(lhs=lhs, rhs=rhs))
+            case "Nb_CastI64ToF64", {"operand": operand}:
+                return grm.write(NbOp_CastI64ToF64(operand=operand))
             case _:
                 # Use parent's implementation for other terms.
                 return super().handle_Term(op, children, grm)
 
 
+# Define cost model that penalize Python operations (`Py_` prefix)
+
+
 class MyCostModel(CostModel):
     def get_cost_function(self, nodename, op, ty, cost, nodes, child_costs):
-        self_cost = None
-
-        match op:
-            case (
-                "Nb_Add_Int64"
-                | "Nb_Sub_Int64"
-                | "Nb_Gt_Int64"
-                | "Nb_Lt_Int64"
-                | "Nb_Not_Int64"
-            ):
-                self_cost = 0.1
-
-        if self_cost is not None:
-            return self_cost + sum(child_costs)
+        if op.startswith("Py_"):
+            # Penalize Python operations
+            return float("inf")
 
         # Fallthrough to parent's cost function
         return super().get_cost_function(
@@ -339,183 +921,7 @@ class MyCostModel(CostModel):
         )
 
 
-TypeInt64 = Type.simple("Int64")
-TypeBool = Type.simple("Bool")
-
-
-@ruleset
-def ruleset_type_infer_gt(io: Term, x: Term, y: Term, add: Term):
-    yield rule(
-        add == Py_GtIO(io, x, y),
-        TypeVar(x).getType() == TypeInt64,
-        TypeVar(y).getType() == TypeInt64,
-    ).then(
-        # convert to a typed operation
-        union(add.getPort(1)).with_(Nb_Gt_Int64(x, y)),
-        # shortcut io
-        union(add.getPort(0)).with_(io),
-        # output type
-        set_(TypeVar(add.getPort(1)).getType()).to(TypeBool),
-    )
-
-
-@ruleset
-def ruleset_type_infer_lt(io: Term, x: Term, y: Term, add: Term):
-    yield rule(
-        add == Py_LtIO(io, x, y),
-        TypeVar(x).getType() == TypeInt64,
-        TypeVar(y).getType() == TypeInt64,
-    ).then(
-        # convert to a typed operation
-        union(add.getPort(1)).with_(Nb_Lt_Int64(x, y)),
-        # shortcut io
-        union(add.getPort(0)).with_(io),
-        # output type
-        set_(TypeVar(add.getPort(1)).getType()).to(TypeBool),
-    )
-
-
-@ruleset
-def ruleset_type_infer_add(io: Term, x: Term, y: Term, add: Term):
-    yield rule(
-        add == Py_AddIO(io, x, y),
-        TypeVar(x).getType() == TypeInt64,
-        TypeVar(y).getType() == TypeInt64,
-    ).then(
-        # convert to a typed operation
-        union(add.getPort(1)).with_(Nb_Add_Int64(x, y)),
-        # shortcut io
-        union(add.getPort(0)).with_(io),
-        # output type
-        set_(TypeVar(add.getPort(1)).getType()).to(TypeInt64),
-    )
-
-
-@ruleset
-def ruleset_type_infer_sub(io: Term, x: Term, y: Term, add: Term):
-    yield rule(
-        add == Py_SubIO(io, x, y),
-        TypeVar(x).getType() == TypeInt64,
-        TypeVar(y).getType() == TypeInt64,
-    ).then(
-        # convert to a typed operation
-        union(add.getPort(1)).with_(Nb_Sub_Int64(x, y)),
-        # shortcut io
-        union(add.getPort(0)).with_(io),
-        # output type
-        set_(TypeVar(add.getPort(1)).getType()).to(TypeInt64),
-    )
-
-
-@ruleset
-def ruleset_type_unify(ta: Type, tb: Type):
-    yield rewrite(ta | tb, subsume=True).to(ta, ta == tb)
-    yield rewrite(Type.simple("undef") | tb, subsume=True).to(tb)
-    yield rewrite(ta | Type.simple("undef"), subsume=True).to(ta)
-
-
-@ruleset
-def ruleset_propagate_typeof_ifelse(
-    then_region: Region,
-    else_region: Region,
-    idx: i64,
-    ifelse: Term,
-    then_ports: PortList,
-    else_ports: PortList,
-    operands: Vec[Term],
-):
-
-    yield rule(
-        # Propagate operand types into the contained regions
-        Term.IfElse(
-            cond=_wc(Term),
-            then=Term.RegionEnd(region=then_region, ports=_wc(PortList)),
-            orelse=Term.RegionEnd(region=else_region, ports=_wc(PortList)),
-            operands=TermList(operands),
-        ),
-        then_region.get(idx),
-    ).then(
-        union(TypeVar(operands[idx])).with_(TypedIns(then_region).arg(idx)),
-        union(TypeVar(operands[idx])).with_(TypedIns(else_region).arg(idx)),
-    )
-
-    yield rule(
-        # Propagate output types from the contained regions
-        ifelse
-        == Term.IfElse(
-            cond=_wc(Term),
-            then=Term.RegionEnd(region=_wc(Region), ports=then_ports),
-            orelse=Term.RegionEnd(region=_wc(Region), ports=else_ports),
-            operands=TermList(operands),
-        ),
-        ta := TypeVar(then_ports.getValue(idx)),
-        tb := TypeVar(else_ports.getValue(idx)),
-    ).then(
-        union(ta).with_(tb),
-        union(ta).with_(TypeVar(ifelse.getPort(idx))),
-    )
-
-
-class TypedIns(Expr):
-    def __init__(self, region: Region): ...
-
-    def arg(self, idx: i64Like) -> TypeVar: ...
-
-
-class TypedOuts(Expr):
-    def __init__(self, region: Region): ...
-
-    def at(self, idx: i64Like) -> TypeVar: ...
-
-
-@ruleset
-def ruleset_region_types(
-    region: Region,
-    idx: i64,
-    typ: TypeVar,
-    term: Term,
-    portlist: PortList,
-):
-    yield rule(
-        # Inputs
-        typ == TypedIns(region).arg(idx),
-        term == region.get(idx),
-    ).then(
-        union(TypeVar(term)).with_(typ),
-    )
-
-    yield rule(
-        # Outputs
-        term == Term.RegionEnd(region=region, ports=portlist),
-        pv := portlist.getValue(idx),
-    ).then(
-        union(TypedOuts(region).at(idx)).with_(TypeVar(pv)),
-    )
-
-
-@ruleset
-def facts_function_types(
-    outports: Vec[Port],
-    func_uid: String,
-    reg_uid: String,
-    fname: String,
-    region: Region,
-):
-    yield rule(
-        GraphRoot(
-            Term.Func(
-                body=Term.RegionEnd(region=region, ports=PortList(outports)),
-                uid=func_uid,
-                fname=fname,
-            )
-        ),
-        region == Region(uid=reg_uid, inports=_wc(InPorts)),
-    ).then(
-        set_(TypedIns(region).arg(1).getType()).to(TypeInt64),
-        set_(TypedIns(region).arg(2).getType()).to(TypeInt64),
-    )
-
-
+# +
 # Lower
 def get_port_by_name(ports: Sequence[rg.Port], name: str):
     for i, p in enumerate(ports):
@@ -525,26 +931,51 @@ def get_port_by_name(ports: Sequence[rg.Port], name: str):
 
 
 class Attributes:
-    _typedins: tuple[NbOp_InTypeAttr, ...]
-    _typedouts: tuple[NbOp_OutTypeAttr, ...]
+    _typedins: dict[int, NbOp_InTypeAttr]
+    _typedouts: dict[int, NbOp_OutTypeAttr]
 
     def __init__(self, attrs: rg.Attrs):
-        self._typedins = tuple(
-            filter(lambda x: isinstance(x, NbOp_InTypeAttr), attrs.attrs)
-        )
-        self._typedouts = tuple(
-            filter(lambda x: isinstance(x, NbOp_OutTypeAttr), attrs.attrs)
-        )
 
-    def get_typed_out(self, idx: int):
-        for at in self._typedouts:
-            if at.idx == idx:
-                return at
-        raise IndexError(idx)
+        ins = {}
+        outs = {}
+        for attr in attrs.attrs:
+            match attr:
+                case NbOp_InTypeAttr(idx=idx):
+                    ins[idx] = attr
+                case NbOp_OutTypeAttr(idx=idx):
+                    outs[idx] = attr
+                case _:
+                    raise ValueError(attr)
+
+        self._typedins = ins
+        self._typedouts = outs
+
+    def get_output_attribute(self, idx: int) -> NbOp_OutTypeAttr | None:
+        return self._typedouts.get(idx)
+
+    def get_output_type(self, idx: int) -> NbOp_Type | None:
+        at = self._typedouts.get(idx)
+        if at is not None:
+            return at.type
+        return None
 
     def get_return_type(self, regionend: rg.RegionEnd):
         i, p = get_port_by_name(regionend.ports, rvsdg.internal_prefix("ret"))
-        return self.get_typed_out(i).type
+        if attr := self.get_output_attribute(i):
+            return attr.type
+        raise CompilationError("Missing return type")
+
+
+@dataclass(frozen=True)
+class LowerStates(ase.TraverseState):
+    builder: ir.IRBuilder
+    push: Callable
+    tos: Callable
+
+
+# -
+
+# Extend LLVM Backend for the new operations
 
 
 class Backend:
@@ -560,6 +991,8 @@ class Backend:
         match ty:
             case NbOp_Type("Int64"):
                 return ir.IntType(64)
+            case NbOp_Type("Float64"):
+                return ir.DoubleType()
             case NbOp_Type("Bool"):
                 return ir.IntType(1)
         raise NotImplementedError(f"unknown type: {ty}")
@@ -567,6 +1000,25 @@ class Backend:
     def lower_io_type(self):
         # IO type is an empty struct
         return ir.LiteralStructType(())
+
+    def get_result_type(self, ta: NbOp_Type, tb: NbOp_Type) -> NbOp_Type:
+        match (ta, tb):
+            case (NbOp_Type("Int64"), NbOp_Type("Float64")) | (
+                NbOp_Type("Float64"),
+                NbOp_Type("Int64"),
+            ):
+                return NbOp_Type("Float64")
+            case _:
+                raise NotImplementedError(f"unsupported cast: {ta} {tb}")
+
+    def lower_cast(self, builder, value, fromty, toty):
+        match fromty, toty:
+            case (NbOp_Type("Int64"), NbOp_Type("Float64")):
+                return builder.sitofp(value, self.lower_type(toty))
+            case _:
+                raise NotImplementedError(
+                    f"unsupported lower_cast: {fromty} -> {toty}"
+                )
 
     def lower(self, root: rg.Func, argtypes):
         mod = ir.Module()
@@ -594,167 +1046,13 @@ class Backend:
         def tos():
             return reg_args_stack[-1]
 
-        def lower_expr(expr: SExpr, state: ase.TraverseState):
-            match expr:
-                case rg.RegionBegin(inports=inports):
-                    values = tos()
-                    assert len(values) == len(inports)
-                    return values
-                case rg.RegionEnd(begin=begin, ports=ports):
-                    yield begin
-                    portvalues = []
-                    for p in ports:
-                        pv = yield p.value
-                        portvalues.append(pv)
-                    return portvalues
-
-                case rg.IfElse(
-                    cond=cond, body=body, orelse=orelse, operands=operands
-                ):
-                    condval = yield cond
-
-                    # process operands
-                    ops = []
-                    for op in operands:
-                        ops.append((yield op))
-
-                    # unpack pybool
-                    match condval.type:
-                        case ir.IntType() if condval.type.width == 1:
-                            condbit = condval
-                        case _:
-                            raise NotImplementedError(
-                                f"unhandled if-cond type: {condval.type}"
-                            )
-
-                    bb_then = builder.append_basic_block("then")
-                    bb_else = builder.append_basic_block("else")
-                    bb_endif = builder.append_basic_block("endif")
-
-                    builder.cbranch(condbit, bb_then, bb_else)
-                    # Then
-                    with builder.goto_block(bb_then):
-                        with push(*ops):
-                            value_then = yield body
-                        builder.branch(bb_endif)
-                        bb_then_end = builder.basic_block
-                    # Else
-                    with builder.goto_block(bb_else):
-                        with push(*ops):
-                            value_else = yield orelse
-                        builder.branch(bb_endif)
-                        bb_else_end = builder.basic_block
-                    # EndIf
-                    builder.position_at_end(bb_endif)
-                    assert len(value_then) == len(value_else)
-                    phis = []
-                    for i, (left, right) in enumerate(
-                        zip(value_then, value_else, strict=True)
-                    ):
-                        assert left.type == right.type
-                        phi = builder.phi(left.type, name=f"ifelse_{i}")
-                        phi.add_incoming(left, bb_then_end)
-                        phi.add_incoming(right, bb_else_end)
-                        phis.append(phi)
-                    return phis
-
-                case rg.Unpack(val=source, idx=int(idx)):
-                    return (yield source)[idx]
-
-                case NbOp_Gt_Int64(lhs, rhs):
-                    lhs = yield lhs
-                    rhs = yield rhs
-                    return builder.icmp_signed(">", lhs, rhs)
-
-                case NbOp_Lt_Int64(lhs, rhs):
-                    lhs = yield lhs
-                    rhs = yield rhs
-                    return builder.icmp_signed("<", lhs, rhs)
-
-                case NbOp_Add_Int64(lhs, rhs):
-                    lhs = yield lhs
-                    rhs = yield rhs
-                    return builder.add(lhs, rhs)
-
-                case NbOp_Sub_Int64(lhs, rhs):
-                    lhs = yield lhs
-                    rhs = yield rhs
-                    return builder.sub(lhs, rhs)
-
-                ##### more
-
-                case NbOp_Undef_Int64():
-                    return ir.IntType(64)(ir.Undefined)
-
-                case rg.PyBool(val):
-                    return ir.IntType(1)(val)
-
-                case rg.PyInt(val):
-                    return ir.IntType(64)(val)
-
-                case NbOp_Not_Int64(operand):
-                    opval = yield operand
-                    return builder.icmp_unsigned("==", opval, opval.type(0))
-
-                case rg.Loop(body=rg.RegionEnd() as body, operands=operands):
-                    # process operands
-                    ops = []
-                    for op in operands:
-                        ops.append((yield op))
-
-                    # Note this is a tail loop.
-                    begin = body.begin
-
-                    with push(*ops):
-                        loopentry_values = yield begin
-
-                    bb_before = builder.basic_block
-                    bb_loopbody = builder.append_basic_block("loopbody")
-                    bb_endloop = builder.append_basic_block("endloop")
-                    builder.branch(bb_loopbody)
-                    # loop body
-                    builder.position_at_end(bb_loopbody)
-                    # setup phi nodes for loopback variables
-
-                    phis = []
-                    for i, var in enumerate(loopentry_values):
-                        phi = builder.phi(var.type, name=f"loop_{i}")
-                        phi.add_incoming(var, bb_before)
-                        phis.append(phi)
-
-                    # generate body
-                    loop_memo = {begin: tuple(phis)}
-                    memo = ase.traverse(
-                        body,
-                        lower_expr,
-                        init_memo=loop_memo,
-                    )
-
-                    loopout_values = list(memo[body])
-                    # get loop condition
-                    loopcond = loopout_values.pop(0)
-
-                    # fix up phis
-                    for i, phi in enumerate(phis):
-                        assert phi.type == loopout_values[i].type, (
-                            phi.type,
-                            loopout_values[i].type,
-                        )
-                        phi.add_incoming(
-                            loopout_values[i], builder.basic_block
-                        )
-                    # back jump
-                    builder.cbranch(loopcond, bb_loopbody, bb_endloop)
-                    # end loop
-                    builder.position_at_end(bb_endloop)
-                    # Returns the value from the loop body because this is a tail loop
-                    return loopout_values
-
-            raise NotImplementedError(expr)
-
         try:
             with push(iostate, *fn.args):
-                memo = ase.traverse(root.body, lower_expr)
+                memo = ase.traverse(
+                    root.body,
+                    self.lower_expr,
+                    state=LowerStates(builder=builder, push=push, tos=tos),
+                )
         except:
             print(mod)
             raise
@@ -765,6 +1063,130 @@ class Backend:
         builder.ret(func_region_outs[i])
 
         return mod
+
+    def lower_expr(self, expr: SExpr, state: LowerStates):
+        builder = state.builder
+        match expr:
+            case rg.RegionBegin(inports=inports):
+                values = state.tos()
+                assert len(values) == len(inports)
+                return values
+            case rg.RegionEnd(begin=begin, ports=ports):
+                yield begin
+                portvalues = []
+                for p in ports:
+                    pv = yield p.value
+                    portvalues.append(pv)
+                return portvalues
+
+            case rg.IfElse(
+                cond=cond, body=body, orelse=orelse, operands=operands
+            ):
+                condval = yield cond
+
+                # process operands
+                ops = []
+                for op in operands:
+                    ops.append((yield op))
+
+                # unpack pybool
+                match condval.type:
+                    case ir.IntType() if condval.type.width == 1:
+                        condbit = condval
+                    case _:
+                        raise NotImplementedError(
+                            f"unhandled if-cond type: {condval.type}"
+                        )
+
+                bb_then = builder.append_basic_block("then")
+                bb_else = builder.append_basic_block("else")
+                bb_endif = builder.append_basic_block("endif")
+
+                builder.cbranch(condbit, bb_then, bb_else)
+
+                # Then
+                with builder.goto_block(bb_then):
+                    with state.push(*ops):
+                        value_then = yield body
+
+                    builder.branch(bb_endif)
+                    bb_then_end = builder.basic_block
+                # Else
+                with builder.goto_block(bb_else):
+                    with state.push(*ops):
+                        value_else = yield orelse
+
+                    builder.branch(bb_endif)
+                    bb_else_end = builder.basic_block
+                # EndIf
+                builder.position_at_end(bb_endif)
+                phis = []
+                paired = zip(value_then, value_else, strict=True)
+                for i, (left, right) in enumerate(paired):
+                    assert left.type == right.type
+                    phi = builder.phi(left.type, name=f"ifelse_{i}")
+                    phi.add_incoming(left, bb_then_end)
+                    phi.add_incoming(right, bb_else_end)
+                    phis.append(phi)
+                return phis
+
+            case rg.Unpack(val=source, idx=int(idx)):
+                return (yield source)[idx]
+
+            case NbOp_Gt_Int64(lhs, rhs):
+                lhs = yield lhs
+                rhs = yield rhs
+                return builder.icmp_signed(">", lhs, rhs)
+
+            case NbOp_Lt_Int64(lhs, rhs):
+                lhs = yield lhs
+                rhs = yield rhs
+                return builder.icmp_signed("<", lhs, rhs)
+
+            case NbOp_Add_Int64(lhs, rhs):
+                lhs = yield lhs
+                rhs = yield rhs
+                return builder.add(lhs, rhs)
+
+            case NbOp_Add_Float64(lhs, rhs):
+                lhs = yield lhs
+                rhs = yield rhs
+                return builder.fadd(lhs, rhs)
+
+            case NbOp_Sub_Int64(lhs, rhs):
+                lhs = yield lhs
+                rhs = yield rhs
+                return builder.sub(lhs, rhs)
+
+            case NbOp_Sub_Float64(lhs, rhs):
+                lhs = yield lhs
+                rhs = yield rhs
+                return builder.fsub(lhs, rhs)
+
+            case NbOp_Div_Int64(lhs, rhs):
+                lhs = yield lhs
+                rhs = yield rhs
+                x = builder.sitofp(lhs, ir.DoubleType())
+                y = builder.sitofp(rhs, ir.DoubleType())
+                return builder.fdiv(x, y)
+
+            case NbOp_CastI64ToF64(operand):
+                val = yield operand
+                return builder.sitofp(val, ir.DoubleType())
+
+            ##### more
+
+            case rg.PyBool(val):
+                return ir.IntType(1)(val)
+
+            case rg.PyInt(val):
+                return ir.IntType(64)(val)
+
+        raise NotImplementedError(expr)
+
+    def lower_more(self, expr: SExpr, state: LowerStates):
+
+        return NotImplemented
 
     def jit_compile(self, llmod: ir.Module, func_node: rg.Func):
         sym = func_node.fname
@@ -791,7 +1213,12 @@ class Backend:
                 match lltype.width:
                     case 64:
                         return ctypes.c_int64
+            case ir.DoubleType():
+                return ctypes.c_double
         raise NotImplementedError(lltype)
+
+
+# Define a new `JitCallable` with control of the argument
 
 
 @dataclass(frozen=True)
@@ -808,35 +1235,164 @@ class JitCallable:
         return self.pyfunc(*args)
 
 
-def example(a, b):
+Int64 = NbOp_Type("Int64")
+
+base_ruleset = (
+    basic_ruleset
+    | ruleset_propagate_typeof_ifelse
+    | ruleset_type_basic
+    | ruleset_type_infer_literals
+    | ruleset_typeinfer_cast
+    | ruleset_type_infer_gt
+    | ruleset_type_infer_lt
+    | ruleset_type_infer_add
+    | ruleset_type_infer_sub
+    | ruleset_type_infer_div
+    | ruleset_region_types
+)
+
+
+# ## Example 1: if-else
+
+
+def example_1(a, b):
     if a > b:
         z = a - b
     else:
         z = b - a
-    return z - a
+    return z + a
 
-
-Int64 = NbOp_Type("Int64")
 
 if __name__ == "__main__":
     jt = compiler_pipeline(
-        example,
+        example_1,
+        argtypes=(Int64, Int64),
+        ruleset=(base_ruleset | facts_function_types),
+        verbose=True,
+        converter_class=ExtendEGraphToRVSDG,
+        cost_model=MyCostModel(),
+        backend=Backend(),
+    )
+    args = (10, 33)
+    run_test(example_1, jt, args, verbose=True)
+    args = (7, 3)
+    run_test(example_1, jt, args, verbose=True)
+
+
+# ## Example 2: add `float()`
+
+
+def example_2(a, b):
+    if a > b:
+        z = float(a - b)
+    else:
+        z = float(b) - 1 / a
+    return z - float(a)
+
+
+if __name__ == "__main__":
+    jt = compiler_pipeline(
+        example_2,
         argtypes=(Int64, Int64),
         ruleset=(
-            basic_ruleset
-            | ruleset_propagate_typeof_ifelse
-            | ruleset_type_unify
-            | ruleset_type_infer_gt
-            | ruleset_type_infer_lt
-            | ruleset_type_infer_add
-            | ruleset_type_infer_sub
-            | ruleset_region_types
+            base_ruleset
             | facts_function_types
+            | ruleset_type_infer_float  # < --- added for float()
         ),
         verbose=True,
         converter_class=ExtendEGraphToRVSDG,
         cost_model=MyCostModel(),
         backend=Backend(),
     )
-    res = jt(10, 7)
-    run_test(example, jt, (10, 7), verbose=True)
+    args = (10, 33)
+    run_test(example_2, jt, args, verbose=True)
+    args = (7, 3)
+    run_test(example_2, jt, args, verbose=True)
+
+# ## Example 3: unify mismatching type
+#
+# What if type of `z` does not match across the branch
+
+
+def example_3(a, b):
+    if a > b:
+        z = a - b  # left as int
+    else:
+        z = float(b) - 1 / a  # this is float
+    return z - float(a)
+
+
+if __name__ == "__main__":
+    try:
+        compiler_pipeline(
+            example_3,
+            argtypes=(Int64, Int64),
+            ruleset=(base_ruleset),
+            verbose=True,
+            converter_class=ExtendEGraphToRVSDG,
+            cost_model=MyCostModel(),
+            backend=Backend(),
+        )
+    except CompilationError as e:
+        # Compilation failed because the return type cannot be determined.
+        # This indicates that the type inference is incomplete
+        print_exception(e)
+        assert "extraction failed" in str(e)
+
+# ## Improve error reporting
+#
+# Add logics to report error early
+
+
+@ruleset
+def ruleset_type_infer_failure_report(
+    ifelse: Term,
+    ty: Type,
+    idx: i64,
+    name: String,
+    then_region: Region,
+    else_region: Region,
+    then_ports: PortList,
+    else_ports: PortList,
+):
+    yield rule(
+        ifelse
+        == Term.IfElse(
+            cond=_wc(Term),
+            then=Term.RegionEnd(then_region, ports=then_ports),
+            orelse=Term.RegionEnd(else_region, ports=else_ports),
+            operands=_wc(TermList),
+        ),
+        ty == TypeVar(ifelse.getPort(idx)).getType(),
+        failed_to_unify(ty),
+        name == then_ports[idx].name,
+    ).then(
+        union(ErrorMsg.root()).with_(
+            ErrorMsg.fail(
+                join("Failed to unify if-else outgoing variables: ", name)
+            )
+        ),
+    )
+
+
+if __name__ == "__main__":
+
+    try:
+        compiler_pipeline(
+            example_3,
+            argtypes=(Int64, Int64),
+            ruleset=(
+                base_ruleset
+                | facts_function_types
+                | ruleset_type_infer_float
+                | ruleset_type_infer_failure_report
+            ),
+            verbose=True,
+            converter_class=ExtendEGraphToRVSDG,
+            cost_model=MyCostModel(),
+            backend=Backend(),
+        )
+
+    except CompilationError as e:
+        print_exception(e)
+        assert "Failed to unify if-else outgoing variables: z" in str(e)
