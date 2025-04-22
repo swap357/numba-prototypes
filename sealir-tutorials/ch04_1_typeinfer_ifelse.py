@@ -83,7 +83,7 @@ from ch03_egraph_program_rewrites import (
     frontend,
     run_test,
 )
-from ch04_0_typeinfer_scalar import (
+from ch04_0_typeinfer_prelude import (
     basic_ruleset,
     middle_end,
 )

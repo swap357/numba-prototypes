@@ -1,6 +1,6 @@
 from sealir import ase
 
-from ch04_0_typeinfer_scalar import *
+from ch04_0_typeinfer_prelude import *
 
 
 def check(fn, ruleset):

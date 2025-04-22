@@ -1,6 +1,6 @@
 from sealir import ase
 
-from ch04_1_typeinfer_controlflow import *
+from ch04_1_typeinfer_ifelse import *
 
 
 def test_ch04_1_example_1():

@@ -47,11 +47,11 @@ from sealir.rvsdg import grammar as rg
 from ch03_egraph_program_rewrites import (
     run_test,
 )
-from ch04_1_typeinfer_controlflow import Backend as Ch04_1_Backend
-from ch04_1_typeinfer_controlflow import (
+from ch04_1_typeinfer_ifelse import Backend as Ch04_1_Backend
+from ch04_1_typeinfer_ifelse import (
     ExtendEGraphToRVSDG as _ch04_1_ExtendEGraphToRVSDG,
 )
-from ch04_1_typeinfer_controlflow import (
+from ch04_1_typeinfer_ifelse import (
     Grammar,
     Int64,
     MyCostModel,
@@ -64,8 +64,8 @@ from ch04_1_typeinfer_controlflow import (
     TypeVar,
     _wc,
 )
-from ch04_1_typeinfer_controlflow import base_ruleset as _ch4_1_base_ruleset
-from ch04_1_typeinfer_controlflow import (
+from ch04_1_typeinfer_ifelse import base_ruleset as _ch4_1_base_ruleset
+from ch04_1_typeinfer_ifelse import (
     compiler_pipeline,
     facts_function_types,
     ruleset_failed_to_unify,
