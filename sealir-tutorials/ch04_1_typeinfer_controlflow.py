@@ -21,7 +21,6 @@
 from __future__ import annotations
 
 import ctypes
-import operator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from functools import partial
@@ -29,7 +28,6 @@ from traceback import print_exception
 from typing import Any, Callable, Sequence
 
 from egglog import (
-    Bool,
     EGraph,
     Expr,
     Ruleset,
@@ -37,6 +35,7 @@ from egglog import (
     StringLike,
     Unit,
     Vec,
+    birewrite,
     eq,
     function,
     i64,
@@ -50,7 +49,6 @@ from egglog import (
     set_,
     union,
     vars_,
-    birewrite,
 )
 from llvmlite import binding as llvm
 from llvmlite import ir
@@ -150,7 +148,7 @@ def ruleset_type_basic(
     # Simplify
     yield rewrite(ta | tb).to(tb | ta)
     yield birewrite((ta | tb) | tc).to(ta | (tb | tc))
-    
+
     # Identify errors
     yield rule(
         # If both sides are valid types and not equal, then fail
@@ -470,7 +468,7 @@ if __name__ == "__main__":
 # + [markdown] jp-MarkdownHeadingCollapsed=true
 # ### A more extensible compiler pipeline
 # We'll need a more extensible compiler pipeline so capability can be added
-# later. The new pipeline also gained error checking base on whether there 
+# later. The new pipeline also gained error checking base on whether there
 # is `ErrorMsg` in the egraph.
 # -
 
@@ -642,11 +640,12 @@ def ruleset_type_infer_div(io: Term, x: Term, y: Term, op: Term):
         Py_DivIO, TypeInt64, TypeInt64, Nb_Div_Int64, TypeFloat64
     )
 
+
 # + [markdown] jp-MarkdownHeadingCollapsed=true
 # ### Rules for type-inference on if-else
 # -
 
-# Most of the logic is just propagation. The key is merging the type-variables 
+# Most of the logic is just propagation. The key is merging the type-variables
 # of all outputs.
 
 
@@ -831,6 +830,7 @@ format_rvsdg = partial(rvsdg.format_rvsdg, format_attrs=my_attr_format)
 
 # ### Extend EGraph to RVSDG
 
+
 class ExtendEGraphToRVSDG(EGraphToRVSDG):
     grammar = Grammar
 
@@ -922,9 +922,10 @@ class ExtendEGraphToRVSDG(EGraphToRVSDG):
 
 
 # + [markdown] jp-MarkdownHeadingCollapsed=true
-# ### Define cost model 
+# ### Define cost model
 # penalize Python operations (`Py_` prefix)
 # -
+
 
 class MyCostModel(CostModel):
     def get_cost_function(self, nodename, op, ty, cost, nodes, child_costs):
@@ -940,6 +941,7 @@ class MyCostModel(CostModel):
 
 # + [markdown] jp-MarkdownHeadingCollapsed=true
 # ### Define Attributes
+
 
 # +
 def get_port_by_name(ports: Sequence[rg.Port], name: str):
@@ -1233,6 +1235,8 @@ class Backend:
             case ir.DoubleType():
                 return ctypes.c_double
         raise NotImplementedError(lltype)
+
+
 # -
 
 
@@ -1310,7 +1314,8 @@ def example_2(a, b):
     return z - float(a)
 
 
-# Add rules for `float()` 
+# Add rules for `float()`
+
 
 @ruleset
 def ruleset_type_infer_float(
@@ -1370,16 +1375,13 @@ def example_3(a, b):
 
 # Add rules to signal error
 
+
 @ruleset
 def ruleset_failed_to_unify(ty: Type):
     yield rule(
         failed_to_unify(ty),
     ).then(
-        union(ErrorMsg.root()).with_(
-            ErrorMsg.fail(
-                "fail to unify"
-            )
-        ),
+        union(ErrorMsg.root()).with_(ErrorMsg.fail("fail to unify")),
     )
 
 
@@ -1388,10 +1390,12 @@ if __name__ == "__main__":
         compiler_pipeline(
             example_3,
             argtypes=(Int64, Int64),
-            ruleset=(base_ruleset
+            ruleset=(
+                base_ruleset
                 | facts_function_types
                 | ruleset_type_infer_float
-                | ruleset_failed_to_unify),
+                | ruleset_failed_to_unify
+            ),
             verbose=True,
             converter_class=ExtendEGraphToRVSDG,
             cost_model=MyCostModel(),
@@ -1461,5 +1465,3 @@ if __name__ == "__main__":
     except CompilationError as e:
         print_exception(e)
         assert "Failed to unify if-else outgoing variables: z" in str(e)
-
-
