@@ -21,7 +21,7 @@ def check(fn, ruleset):
     return extracted
 
 
-def test_ch04_code_functioning():
+def test_ch04_0_code_functioning():
     """
     Test the final code that uses everything
     """
@@ -35,7 +35,7 @@ def test_ch04_code_functioning():
     run_test(chained_additions, jt, (321, 4535))
 
 
-def test_ch04_typeinfer():
+def test_ch04_0_typeinfer():
     """
     Test type-inference rules
     """
@@ -48,7 +48,7 @@ def test_ch04_typeinfer():
     assert len(inferred_ops) == 1
 
 
-def test_ch04_boxing_optimization():
+def test_ch04_0_boxing_optimization():
     """
     Count the number of boxing and unboxing operations before and after
     apply the optimized-ruleset.
