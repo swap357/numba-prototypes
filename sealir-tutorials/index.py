@@ -12,7 +12,7 @@
 #     name: python3
 # ---
 
-# # Numba v2 Compiler Design <img src="https://numba.pydata.org/_static/numba-blue-icon-rgb.svg" width="80" style="float:right;"/> 
+# # Numba v2 Compiler Design <img src="https://numba.pydata.org/_static/numba-blue-icon-rgb.svg" width="80" style="float:right;"/>
 #
 # This book describes the compiler design of the next generation Numba compiler.  This compiler and its components are *extremely experimental* and under rapid development.  If you have questions, [raise an issue](https://github.com/numba/numba-prototypes/issues) on the GitHub repository.
 #
@@ -22,6 +22,9 @@
 # * [Chapter 2 - EGraph Basics](ch02_egraph_basic.html)
 # * [Chapter 3 - Rewriting Programs with EGraphs](ch03_egraph_program_rewrites.html)
 # * Chapter 4 - Scalar Type Inference with EGraphs
+#   - [Part 0 - Type inference for scalar operations](ch04_0_typeinfer_prelude.html)
+#   - [Part 1 - Fully typing a scalar function with if-else branch](ch04_1_typeinfer_ifelse.html)
+#   - [Part 2 - Fully typing a scalar function with loops](ch04_2_typeinfer_loops.html)
 # * Chapter 5 - Array Type Inference with EGraphs
 # * Chapter 6 - MLIR Backend for Scalar Functions
 # * Chapter 7 - MLIR Backend for Array Functions
