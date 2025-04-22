@@ -148,23 +148,10 @@ def ruleset_type_basic(
 ):
     # If ta == tb. then ta
     yield rewrite(ta | tb, subsume=True).to(ta, ta == tb)
-    # If undef | tb, then tb
-    yield rewrite(Type.simple("undef") | tb, subsume=True).to(tb)
-    # If ta | undef, then ta
-    yield rewrite(ta | Type.simple("undef"), subsume=True).to(ta)
-
-    # Identify valid type
-    yield rule(
-        ty == Type.simple(name),
-        ne(name).to(String("undef")),
-    ).then(is_valid_type(ty))
-
     # Identify errors
     yield rule(
         # If both sides are valid types and not equal, then fail
         ty == ta | tb,
-        is_valid_type(ta),
-        is_valid_type(tb),
         ne(ta).to(tb),  # ta != tb
     ).then(failed_to_unify(ty))
 
@@ -175,7 +162,6 @@ if __name__ == "__main__":
     eg.register(TypeBool)
     eg.register(TypeFloat64)
     eg.register(TypeInt64 | TypeFloat64)
-    eg.register(TypeInt64 | Type.simple("undef"))
     print("First run")
     eg.run(ruleset_type_basic)
     if IN_NOTEBOOK:
@@ -495,6 +481,7 @@ def compiler_pipeline(
         if verbose and IN_NOTEBOOK:
             # For inspecting the egraph
             egraph.display(graphviz=True)
+        # egraph.display()
 
         # Use egglog's default extractor to get the error messages
         errmsgs = map(
@@ -665,18 +652,15 @@ def ruleset_propagate_typeof_ifelse(
     then_region: Region,
     else_region: Region,
     idx: i64,
+    stop: i64,
     ifelse: Term,
     then_ports: PortList,
     else_ports: PortList,
     operands: Vec[Term],
-    vecport: Vec[Port],
-    tv: TypeVar,
-    term: Term,
-    term2: Term,
-    name: String,
-    ty: Type,
     ta: Type,
     tb: Type,
+    ty: Type,
+    vecports: Vec[Port],
 ):
 
     yield rule(
@@ -694,6 +678,29 @@ def ruleset_propagate_typeof_ifelse(
     )
 
     yield rule(
+        # Propagate operand types into the contained regions
+        Term.IfElse(
+            cond=_wc(Term),
+            then=Term.RegionEnd(region=then_region, ports=_wc(PortList)),
+            orelse=Term.RegionEnd(region=else_region, ports=_wc(PortList)),
+            operands=TermList(operands),
+        ),
+        else_region.get(idx),
+    ).then(
+        union(TypeVar(operands[idx])).with_(TypedIns(then_region).arg(idx)),
+        union(TypeVar(operands[idx])).with_(TypedIns(else_region).arg(idx)),
+    )
+
+    @function
+    def propagate_ifelse_outs(
+        idx: i64Like,
+        stop: i64Like,
+        then_ports: PortList,
+        else_ports: PortList,
+        ifelse: Term,
+    ) -> Unit: ...
+
+    yield rule(
         # Propagate output types from the contained regions
         ifelse
         == Term.IfElse(
@@ -702,12 +709,29 @@ def ruleset_propagate_typeof_ifelse(
             orelse=Term.RegionEnd(region=_wc(Region), ports=else_ports),
             operands=TermList(operands),
         ),
-        ta == TypeVar(then_ports.getValue(idx)).getType(),
-        tb == TypeVar(else_ports.getValue(idx)).getType(),
+        then_ports == PortList(vecports),
     ).then(
-        # Output type variable cannot exist until both side of the branches
-        # are typed.
-        set_(TypeVar(ifelse.getPort(idx)).getType()).to(ta | tb)
+        propagate_ifelse_outs(
+            0, vecports.length(), then_ports, else_ports, ifelse
+        )
+    )
+
+    yield rule(
+        propagate_ifelse_outs(idx, stop, then_ports, else_ports, ifelse),
+        idx < stop,
+    ).then(
+        propagate_ifelse_outs(idx + 1, stop, then_ports, else_ports, ifelse),
+    )
+
+    yield rule(
+        propagate_ifelse_outs(idx, stop, then_ports, else_ports, ifelse),
+    ).then(
+        union(TypeVar(then_ports.getValue(idx))).with_(
+            TypeVar(else_ports.getValue(idx))
+        ),
+        union(TypeVar(ifelse.getPort(idx))).with_(
+            TypeVar(else_ports.getValue(idx))
+        ),
     )
 
 
@@ -1123,7 +1147,9 @@ class Backend:
                 phis = []
                 paired = zip(value_then, value_else, strict=True)
                 for i, (left, right) in enumerate(paired):
-                    assert left.type == right.type
+                    assert (
+                        left.type == right.type
+                    ), f"{left.type} != {right.type}"
                     phi = builder.phi(left.type, name=f"ifelse_{i}")
                     phi.add_incoming(left, bb_then_end)
                     phi.add_incoming(right, bb_else_end)

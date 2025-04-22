@@ -51,7 +51,7 @@ from ch04_1_typeinfer_controlflow import Backend as Ch04_1_Backend
 from ch04_1_typeinfer_controlflow import (
     ExtendEGraphToRVSDG as _ch04_1_ExtendEGraphToRVSDG,
 )
-from ch04_1_typeinfer_controlflow import (
+from ch04_1_typeinfer_controlflow import (  # ruleset_type_infer_failure_report,
     Grammar,
     Int64,
     MyCostModel,
@@ -63,10 +63,11 @@ from ch04_1_typeinfer_controlflow import (
     TypeInt64,
     TypeVar,
     _wc,
-    base_ruleset,
+)
+from ch04_1_typeinfer_controlflow import base_ruleset as _ch4_1_base_ruleset
+from ch04_1_typeinfer_controlflow import (  # ruleset_type_infer_failure_report,
     compiler_pipeline,
     facts_function_types,
-    ruleset_type_infer_failure_report,
     ruleset_type_infer_float,
 )
 
@@ -122,11 +123,14 @@ def ruleset_propagate_typeof_loops(
     yield rule(
         assign_output_loop_typevar(start, stop, ports, operands, loop),
         start > 0,
-        ty == TypeVar(ports.getValue(start)).getType(),
+        # ty == TypeVar(ports.getValue(start)).getType(),
     ).then(
-        set_(TypeVar(operands[start - 1]).getType()).to(ty),
+        # set_(TypeVar(operands[start - 1]).getType()).to(ty),
         union(TypeVar(ports.getValue(start))).with_(
             TypeVar(loop.getPort(start - 1))
+        ),
+        union(TypeVar(ports.getValue(start))).with_(
+            TypeVar(operands[start - 1])
         ),
     )
 
@@ -150,9 +154,7 @@ def ruleset_others(x: Term, y: Term, io: Term):
     yield rule(x == Term.LiteralBool(_wc(Bool))).then(
         set_(TypeVar(x).getType()).to(TypeBool)
     )
-    yield rule(x == Term.Undef(_wc(String))).then(
-        set_(TypeVar(x).getType()).to(Type.simple("undef"))
-    )
+    yield rule(x == Term.Undef(_wc(String))).then(TypeVar(x))
     yield rule(
         x == Term.Undef(_wc(String)),
         TypeVar(x).getType() == TypeInt64,
@@ -264,7 +266,19 @@ class Backend(Ch04_1_Backend):
         return (yield from super().lower_expr(expr, state))
 
 
-def example(init, n):
+base_ruleset = (
+    _ch4_1_base_ruleset
+    | facts_function_types
+    | ruleset_others
+    | ruleset_propagate_typeof_loops
+    | ruleset_type_infer_float
+    # | ruleset_type_infer_failure_report
+)
+
+# ## Simple while loop example
+
+
+def example_1(init, n):
     c = float(init)
     i = 0
     while i < n:
@@ -275,19 +289,40 @@ def example(init, n):
 
 if __name__ == "__main__":
     jt = compiler_pipeline(
-        example,
+        example_1,
         argtypes=(Int64, Int64),
-        ruleset=(
-            base_ruleset
-            | facts_function_types
-            | ruleset_others
-            | ruleset_propagate_typeof_loops
-            | ruleset_type_infer_float
-            | ruleset_type_infer_failure_report
-        ),
+        ruleset=base_ruleset,
         verbose=True,
         converter_class=ExtendEGraphToRVSDG,
         cost_model=MyCostModel(),
         backend=Backend(),
     )
-    run_test(example, jt, (10, 7), verbose=True)
+    run_test(example_1, jt, (10, 7), verbose=True)
+
+
+# ## Nested Loop example
+
+
+def example_2(init, n):
+    c = float(init)
+    i = 0
+    while i < n:
+        j = 0
+        while j < i:
+            c = c + float(j)
+            j = j + 1
+        i = i + 1
+    return c
+
+
+if __name__ == "__main__":
+    jt = compiler_pipeline(
+        example_2,
+        argtypes=(Int64, Int64),
+        ruleset=base_ruleset,
+        verbose=True,
+        converter_class=ExtendEGraphToRVSDG,
+        cost_model=MyCostModel(),
+        backend=Backend(),
+    )
+    run_test(example_2, jt, (10, 7), verbose=True)
