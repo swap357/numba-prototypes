@@ -44,10 +44,12 @@ def test_ch04_1_example_3():
         compiler_pipeline(
             example_3,
             argtypes=(Int64, Int64),
-            ruleset=(base_ruleset
+            ruleset=(
+                base_ruleset
                 | facts_function_types
                 | ruleset_type_infer_float
-                | ruleset_failed_to_unify),
+                | ruleset_failed_to_unify
+            ),
             verbose=False,
             converter_class=ExtendEGraphToRVSDG,
             cost_model=MyCostModel(),
@@ -81,4 +83,3 @@ def test_ch04_1_example_4():
     except CompilationError as e:
         print_exception(e)
         assert "Failed to unify if-else outgoing variables: z" in str(e)
-
