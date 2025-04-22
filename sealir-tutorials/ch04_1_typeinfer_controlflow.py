@@ -7,7 +7,7 @@
 #       format_version: '1.5'
 #       jupytext_version: 1.16.7
 #   kernelspec:
-#     display_name: sealir_basic_compiler
+#     display_name: Python 3 (ipykernel)
 #     language: python
 #     name: python3
 # ---
@@ -50,6 +50,7 @@ from egglog import (
     set_,
     union,
     vars_,
+    birewrite,
 )
 from llvmlite import binding as llvm
 from llvmlite import ir
@@ -126,28 +127,30 @@ if __name__ == "__main__":
     print(TypeFloat64)
     print("The following will not be allowed:")
     print(TypeInt64 | TypeFloat64)
+    print(TypeInt64 | TypeFloat64 | TypeInt64)
 
 
-# Let's define some rules that will establish the above facts:
+# Let's define some rules that will establish what is disallowed:
 
 
 @function
 def failed_to_unify(ty: Type) -> Unit: ...
 
 
-@function
-def is_valid_type(ty: Type) -> Unit: ...
-
-
 @ruleset
 def ruleset_type_basic(
     ta: Type,
     tb: Type,
+    tc: Type,
     name: String,
     ty: Type,
 ):
     # If ta == tb. then ta
     yield rewrite(ta | tb, subsume=True).to(ta, ta == tb)
+    # Simplify
+    yield rewrite(ta | tb).to(tb | ta)
+    yield birewrite((ta | tb) | tc).to(ta | (tb | tc))
+    
     # Identify errors
     yield rule(
         # If both sides are valid types and not equal, then fail
@@ -162,6 +165,7 @@ if __name__ == "__main__":
     eg.register(TypeBool)
     eg.register(TypeFloat64)
     eg.register(TypeInt64 | TypeFloat64)
+    eg.register(TypeInt64 | TypeFloat64 | TypeInt64)
     print("First run")
     eg.run(ruleset_type_basic)
     if IN_NOTEBOOK:
@@ -170,11 +174,11 @@ if __name__ == "__main__":
     eg.run(ruleset_type_basic)
     if IN_NOTEBOOK:
         eg.display(graphviz=True)
+    print("Fully saturated")
+    eg.run(ruleset_type_basic.saturate())
+    if IN_NOTEBOOK:
+        eg.display(graphviz=True)
 
-
-# Observe:
-# - `failed_to_unify()` only appears in the second run because it depends on the
-#   information from the first.
 
 # ### `TypeVar`
 # A type variable for associating program terms and their type.
@@ -195,7 +199,30 @@ class TypeVar(Expr):
         Multiple definitions will be merged by Type.__or__, causing a
         unification.
         """
+        ...
 
+
+# Example use of `TypeVar` showing what happens when type-variables with conflicting types are merged:
+
+if __name__ == "__main__":
+    eg = EGraph()
+    tv_x = TypeVar(Term.LiteralStr("x"))
+    tv_y = TypeVar(Term.LiteralStr("y"))
+    eg.register(
+        set_(tv_x.getType()).to(TypeInt64),
+        set_(tv_y.getType()).to(TypeFloat64),
+    )
+    eg.run(ruleset_type_basic.saturate())
+    if IN_NOTEBOOK:
+        eg.display(graphviz=True)
+
+# Merging the two type variables will also merge the type that points to:
+
+if __name__ == "__main__":
+    eg.register(union(tv_x).with_(tv_y))
+    eg.run(ruleset_type_basic.saturate())
+    if IN_NOTEBOOK:
+        eg.display(graphviz=True)
 
 # ## Handling type inference errors
 # Type inference can fail, so we must provide a mechanism for reporting errors.
@@ -433,13 +460,19 @@ if __name__ == "__main__":
 
 # The above compilation have to stop early because we haven't implemented the
 # conversions of `Nb_Add_Int64` back into RVSDG.
+#
+# Observe:
+# - `Typedouts`, `TypedIns`, `Type.simple("Int64")`
 
 # ## Extend the rest of the compiler
 
 
+# + [markdown] jp-MarkdownHeadingCollapsed=true
 # ### A more extensible compiler pipeline
 # We'll need a more extensible compiler pipeline so capability can be added
-# later.
+# later. The new pipeline also gained error checking base on whether there 
+# is `ErrorMsg` in the egraph.
+# -
 
 
 class CompilationError(Exception):
@@ -517,7 +550,9 @@ def compiler_pipeline(
     return backend.jit_compile(llmod, extracted)
 
 
-# Define EGraph functions for new operations:
+# + [markdown] jp-MarkdownHeadingCollapsed=true
+# ### Define EGraph functions for new operations:
+# -
 
 
 @function
@@ -536,7 +571,7 @@ def Nb_CastI64ToF64(operand: Term) -> Term: ...
 def Nb_CastToFloat(arg: Term) -> Term: ...
 
 
-# Define rules for the operations:
+# ### Define rules for the operations:
 
 
 @ruleset
@@ -564,7 +599,7 @@ def ruleset_type_infer_sub(io: Term, x: Term, y: Term, op: Term):
     )
 
 
-##
+## This works but not needed
 # @ruleset
 # def ruleset_type_infer_sub_promote(io: Term, x: Term, y: Term, op: Term):
 #     # # Promote to float if one side is float
@@ -603,48 +638,16 @@ def ruleset_typeinfer_cast(op: Term, val: Term):
 
 @ruleset
 def ruleset_type_infer_div(io: Term, x: Term, y: Term, op: Term):
-    yield rule(
-        op == Py_DivIO(io, x, y),
-        TypeVar(x).getType() == TypeInt64,
-        TypeVar(y).getType() == TypeInt64,
-    ).then(
-        # convert to a typed operation
-        union(op.getPort(1)).with_(Nb_Div_Int64(x, y)),
-        # shortcut io
-        union(op.getPort(0)).with_(io),
-        # output type
-        set_(TypeVar(op.getPort(1)).getType()).to(TypeFloat64),
+    yield make_rule_for_binop(
+        Py_DivIO, TypeInt64, TypeInt64, Nb_Div_Int64, TypeFloat64
     )
 
+# + [markdown] jp-MarkdownHeadingCollapsed=true
+# ### Rules for type-inference on if-else
+# -
 
-@ruleset
-def ruleset_type_infer_float(
-    io: Term, loadglb: Term, callstmt: Term, args: Vec[Term], arg: Term
-):
-    yield rule(
-        # Convert Python float(arg)
-        loadglb == Py_LoadGlobal(io=_wc(Term), name="float"),
-        callstmt == Py_Call(io=io, func=loadglb, args=TermList(args)),
-        eq(args.length()).to(i64(1)),
-    ).then(
-        union(callstmt.getPort(1)).with_(Nb_CastToFloat(args[0])),
-        union(callstmt.getPort(0)).with_(io),
-    )
-    # Type check and specialize
-    yield rewrite(
-        Nb_CastToFloat(arg),
-        subsume=True,
-    ).to(
-        Nb_CastI64ToF64(arg),
-        # given
-        TypeVar(arg).getType() == TypeInt64,
-    )
-
-
-# Rules for type-inference on if-else
-
-# Most of the logic is just propagation. The key is merging the the type at
-# the output ports of the IfElse regions
+# Most of the logic is just propagation. The key is merging the type-variables 
+# of all outputs.
 
 
 @ruleset
@@ -677,20 +680,6 @@ def ruleset_propagate_typeof_ifelse(
         union(TypeVar(operands[idx])).with_(TypedIns(else_region).arg(idx)),
     )
 
-    yield rule(
-        # Propagate operand types into the contained regions
-        Term.IfElse(
-            cond=_wc(Term),
-            then=Term.RegionEnd(region=then_region, ports=_wc(PortList)),
-            orelse=Term.RegionEnd(region=else_region, ports=_wc(PortList)),
-            operands=TermList(operands),
-        ),
-        else_region.get(idx),
-    ).then(
-        union(TypeVar(operands[idx])).with_(TypedIns(then_region).arg(idx)),
-        union(TypeVar(operands[idx])).with_(TypedIns(else_region).arg(idx)),
-    )
-
     @function
     def propagate_ifelse_outs(
         idx: i64Like,
@@ -717,6 +706,7 @@ def ruleset_propagate_typeof_ifelse(
     )
 
     yield rule(
+        # Step forward
         propagate_ifelse_outs(idx, stop, then_ports, else_ports, ifelse),
         idx < stop,
     ).then(
@@ -726,9 +716,11 @@ def ruleset_propagate_typeof_ifelse(
     yield rule(
         propagate_ifelse_outs(idx, stop, then_ports, else_ports, ifelse),
     ).then(
+        # TypeVars of then ports are else ports
         union(TypeVar(then_ports.getValue(idx))).with_(
             TypeVar(else_ports.getValue(idx))
         ),
+        # TypeVars of ifelse outputs are else ports
         union(TypeVar(ifelse.getPort(idx))).with_(
             TypeVar(else_ports.getValue(idx))
         ),
@@ -738,7 +730,8 @@ def ruleset_propagate_typeof_ifelse(
 SExpr = rvsdg.grammar.SExpr
 
 
-# Extend RVSDG Grammar for the new operations
+# + [markdown] jp-MarkdownHeadingCollapsed=true
+# ### Extend RVSDG Grammar for the new operations
 
 
 # +
@@ -833,12 +826,10 @@ def my_attr_format(attrs: rg.Attrs) -> str:
     return format(ins) + "->" + format(outs)
 
 
-# +
 format_rvsdg = partial(rvsdg.format_rvsdg, format_attrs=my_attr_format)
 
 
-# Extend EGraph to RVSDG
-
+# ### Extend EGraph to RVSDG
 
 class ExtendEGraphToRVSDG(EGraphToRVSDG):
     grammar = Grammar
@@ -930,8 +921,10 @@ class ExtendEGraphToRVSDG(EGraphToRVSDG):
                 return super().handle_Term(op, children, grm)
 
 
-# Define cost model that penalize Python operations (`Py_` prefix)
-
+# + [markdown] jp-MarkdownHeadingCollapsed=true
+# ### Define cost model 
+# penalize Python operations (`Py_` prefix)
+# -
 
 class MyCostModel(CostModel):
     def get_cost_function(self, nodename, op, ty, cost, nodes, child_costs):
@@ -945,8 +938,10 @@ class MyCostModel(CostModel):
         )
 
 
+# + [markdown] jp-MarkdownHeadingCollapsed=true
+# ### Define Attributes
+
 # +
-# Lower
 def get_port_by_name(ports: Sequence[rg.Port], name: str):
     for i, p in enumerate(ports):
         if p.name == name:
@@ -990,16 +985,16 @@ class Attributes:
         raise CompilationError("Missing return type")
 
 
+# + [markdown] jp-MarkdownHeadingCollapsed=true
+# ### Extend LLVM Backend for the new operations
+
+
+# +
 @dataclass(frozen=True)
 class LowerStates(ase.TraverseState):
     builder: ir.IRBuilder
     push: Callable
     tos: Callable
-
-
-# -
-
-# Extend LLVM Backend for the new operations
 
 
 class Backend:
@@ -1210,10 +1205,6 @@ class Backend:
 
         raise NotImplementedError(expr)
 
-    def lower_more(self, expr: SExpr, state: LowerStates):
-
-        return NotImplemented
-
     def jit_compile(self, llmod: ir.Module, func_node: rg.Func):
         sym = func_node.fname
         # Create JIT
@@ -1242,6 +1233,7 @@ class Backend:
             case ir.DoubleType():
                 return ctypes.c_double
         raise NotImplementedError(lltype)
+# -
 
 
 # Define a new `JitCallable` with control of the argument
@@ -1278,7 +1270,9 @@ base_ruleset = (
 )
 
 
-# ## Example 1: if-else
+# + [markdown] jp-MarkdownHeadingCollapsed=true
+# ## Example 1: simple if-else
+# -
 
 
 def example_1(a, b):
@@ -1316,6 +1310,32 @@ def example_2(a, b):
     return z - float(a)
 
 
+# Add rules for `float()` 
+
+@ruleset
+def ruleset_type_infer_float(
+    io: Term, loadglb: Term, callstmt: Term, args: Vec[Term], arg: Term
+):
+    yield rule(
+        # Convert Python float(arg)
+        loadglb == Py_LoadGlobal(io=_wc(Term), name="float"),
+        callstmt == Py_Call(io=io, func=loadglb, args=TermList(args)),
+        eq(args.length()).to(i64(1)),
+    ).then(
+        union(callstmt.getPort(1)).with_(Nb_CastToFloat(args[0])),
+        union(callstmt.getPort(0)).with_(io),
+    )
+    # Type check and specialize
+    yield rewrite(
+        Nb_CastToFloat(arg),
+        subsume=True,
+    ).to(
+        Nb_CastI64ToF64(arg),
+        # given
+        TypeVar(arg).getType() == TypeInt64,
+    )
+
+
 if __name__ == "__main__":
     jt = compiler_pipeline(
         example_2,
@@ -1337,15 +1357,30 @@ if __name__ == "__main__":
 
 # ## Example 3: unify mismatching type
 #
-# What if type of `z` does not match across the branch
+# What if type of `z` does not match across the branch?
 
 
 def example_3(a, b):
     if a > b:
-        z = a - b  # left as int
+        z = a - b  # this as int
     else:
         z = float(b) - 1 / a  # this is float
     return z - float(a)
+
+
+# Add rules to signal error
+
+@ruleset
+def ruleset_failed_to_unify(ty: Type):
+    yield rule(
+        failed_to_unify(ty),
+    ).then(
+        union(ErrorMsg.root()).with_(
+            ErrorMsg.fail(
+                "fail to unify"
+            )
+        ),
+    )
 
 
 if __name__ == "__main__":
@@ -1353,7 +1388,10 @@ if __name__ == "__main__":
         compiler_pipeline(
             example_3,
             argtypes=(Int64, Int64),
-            ruleset=(base_ruleset),
+            ruleset=(base_ruleset
+                | facts_function_types
+                | ruleset_type_infer_float
+                | ruleset_failed_to_unify),
             verbose=True,
             converter_class=ExtendEGraphToRVSDG,
             cost_model=MyCostModel(),
@@ -1363,9 +1401,9 @@ if __name__ == "__main__":
         # Compilation failed because the return type cannot be determined.
         # This indicates that the type inference is incomplete
         print_exception(e)
-        assert "extraction failed" in str(e)
+        assert "fail to unify" in str(e)
 
-# ## Improve error reporting
+# ## Example 4: Improve error reporting
 #
 # Add logics to report error early
 
@@ -1411,6 +1449,7 @@ if __name__ == "__main__":
                 base_ruleset
                 | facts_function_types
                 | ruleset_type_infer_float
+                | ruleset_failed_to_unify
                 | ruleset_type_infer_failure_report
             ),
             verbose=True,
@@ -1422,3 +1461,5 @@ if __name__ == "__main__":
     except CompilationError as e:
         print_exception(e)
         assert "Failed to unify if-else outgoing variables: z" in str(e)
+
+
