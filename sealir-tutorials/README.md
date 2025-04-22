@@ -18,7 +18,6 @@ compiler that integrates Egraph and MLIR.
 ```bash
 conda env create -f=./conda_environment.yml -n sealir_tutorial
 conda activate sealir_tutorial
-pip install git+https://github.com/numba/sealir
 ```
 
 ## Working on the notebooks
@@ -28,7 +27,7 @@ Run `make all` to initialize `*.ipynb` files.
 It can be easier to edit the markdown in `.ipynb` via visual editors.
 Edits can be synchronized to the paired py-ipynb files by `make sync`
 
-Run `make format` to use `black` and `isort` to auto-format the scripts. 
+Run `make format` to use `black` and `isort` to auto-format the scripts.
 
 To remove the `*.ipynb` files, run `make clean`.
 
@@ -38,3 +37,12 @@ To remove the `*.ipynb` files, run `make clean`.
 Tests are located in `./tests` directory.
 
 Use `pytest` to run all tests.
+
+## Rendering notebooks to HTML
+
+Run `make pages` to render the notebooks to HTML for export to GitHub pages.
+Output will be in the `../pages/sealir-tutorials` subdirectory.  Remember to keep
+the Markdown table of contents in `index.py` file up-to-date when new notebooks
+are added.
+
+You can view pre-rendered notebooks at: https://numba.pydata.org/numba-prototypes/sealir_tutorials/
