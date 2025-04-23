@@ -155,6 +155,39 @@ if __name__ == "__main__":
         eg.display(graphviz=True)
 
 
+# ### Merging symbolic dimension to fixed dimension
+
+# introduce a new array `array1`
+
+if __name__ == "__main__":
+    array1 = ArrayDesc(uid="array1")
+    eg.register(
+        set_(array1.ndim).to(3),
+        set_(array1.dim(0)).to(Dim.fixed(10)),
+        set_(array1.dim(1)).to(Dim.fixed(24)),
+        set_(array1.dim(2)).to(Dim.symbolic("K")),
+    )
+    if IN_NOTEBOOK:
+        eg.display(graphviz=True)
+
+
+# merge `array0` with `array1`
+
+if __name__ == "__main__":
+    eg.register(union(array0).with_(array1))
+    eg.run(1)
+    if IN_NOTEBOOK:
+        eg.display(graphviz=True)
+
+    # check that the Dim merged
+    eg.check(array0.dim(0) == array1.dim(0))
+    eg.check(array0.dim(1) == array1.dim(1))
+    eg.check(array0.dim(2) == array1.dim(2))
+
+    eg.check(Dim.symbolic("M") == Dim.fixed(10))
+    eg.check(Dim.symbolic("N") == Dim.fixed(24))
+    eg.check(Dim.symbolic("K") == Dim.fixed(4))
+
 # ## Extend the compiler
 
 
