@@ -60,18 +60,16 @@ from sealir.eqsat.rvsdg_eqsat import (
 )
 
 from ch04_1_typeinfer_ifelse import (
-    ExtendEGraphToRVSDG as _ch04_2_ExtendEGraphToRVSDG,
-)
-from ch04_1_typeinfer_ifelse import (
     Grammar,
     NbOp_Type,
     TypedIns,
     _wc,
 )
-from ch04_2_typeinfer_loops import Backend
 from ch04_2_typeinfer_loops import Backend as _ch04_2_Backend
 from ch04_2_typeinfer_loops import (
-    ExtendEGraphToRVSDG,
+    ExtendEGraphToRVSDG as _ch04_2_ExtendEGraphToRVSDG,
+)
+from ch04_2_typeinfer_loops import (
     Int64,
     MyCostModel,
     NbOp_Base,
@@ -362,5 +360,43 @@ if __name__ == "__main__":
     param_ary.shape[0] = ary.shape[0]
 
     got = jt(ctypes.byref(param_ary), 3)
+    print("got", got)
     expect = example_1(ary, 3)
+    assert got == expect
+
+
+# ## Example 2: Sum numbers in 1D array
+
+
+def example_2(ary, size):
+    i = 0
+    c = 0
+    while i < size:
+        c = c + ary[i]
+        i = i + 1
+    return c
+
+
+if __name__ == "__main__":
+    jt = compiler_pipeline(
+        example_2,
+        argtypes=(array_1d_symbolic, Int64),
+        ruleset=(
+            base_ruleset
+            | facts_function_types
+            | ruleset_typeinfer_array_getitem
+        ),
+        verbose=True,
+        converter_class=ExtendEGraphToRVSDG,
+        cost_model=MyCostModel(),
+        backend=Backend(),
+    )
+    ary = np.arange(10, dtype=np.int64)
+    param_ary = CtypeInt64Array1D()
+    param_ary.ptr = ary.ctypes.data
+    param_ary.shape[0] = ary.shape[0]
+
+    got = jt(ctypes.byref(param_ary), ary.size)
+    print("got", got)
+    expect = example_2(ary, ary.size)
     assert got == expect
