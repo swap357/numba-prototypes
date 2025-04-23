@@ -25,6 +25,7 @@ from egglog import (
     EGraph,
     Expr,
     Ruleset,
+    delete,
     String,
     StringLike,
     Unit,
@@ -43,6 +44,7 @@ from egglog import (
     set_,
     union,
     vars_,
+    subsume,
 )
 from llvmlite import ir
 from sealir.eqsat.py_eqsat import (
@@ -91,7 +93,7 @@ from utils import IN_NOTEBOOK
 
 class Dim(Expr):
     @classmethod
-    def fixed(self, size: i64) -> Dim: ...
+    def fixed(self, size: i64Like) -> Dim: ...
     @classmethod
     def symbolic(self, unque_id: StringLike) -> Dim: ...
 
@@ -433,3 +435,176 @@ if __name__ == "__main__":
     print("got", got)
     expect = example_2(ary, ary.size)
     assert got == expect
+
+
+# ## Broadcasting logic
+
+if __name__ == "__main__":
+    eg = EGraph()
+
+    # array0 is M x N x 10 x 4
+    array0 = ArrayDesc(uid="array0")
+    eg.register(
+        set_(array0.dtype).to(TypeInt64),
+        set_(array0.ndim).to(4),
+        set_(array0.dim(0)).to(Dim.symbolic("M")),
+        set_(array0.dim(1)).to(Dim.symbolic("N")),
+        set_(array0.dim(2)).to(Dim.fixed(10)),
+        set_(array0.dim(3)).to(Dim.fixed(4)),
+    )
+
+    # array1 is 1 x 4
+    array1 = ArrayDesc(uid="array1")
+    eg.let("array1", array1)
+    eg.register(
+        set_(array1.dtype).to(TypeInt64),
+        set_(array1.ndim).to(2),
+        set_(array1.dim(0)).to(Dim.fixed(1)),
+        set_(array1.dim(1)).to(Dim.fixed(4)),
+    )
+
+    if IN_NOTEBOOK:
+        eg.display(graphviz=True)
+        
+    @function
+    def Broadcast(x: ArrayDesc, y: ArrayDesc) -> ArrayDesc:
+        ...
+
+    broadcasted = Broadcast(array0, array1)
+    eg.let("broadcasted", broadcasted)
+
+    @function
+    def ArrayAddDim(x: ArrayDesc, nd_diff: i64) -> ArrayDesc:
+        ...
+
+    @function
+    def AddLeftDim(x: ArrayDesc, dim: Dim) -> ArrayDesc:
+        ...
+
+    @function
+    def CopyDim(src: ArrayDesc, dst: ArrayDesc, start: i64Like, offset: i64Like) -> Unit:
+        ...
+
+    @function
+    def CheckBroadcast(x: ArrayDesc, y: ArrayDesc, res: ArrayDesc) -> Unit: ...
+
+    @function
+    def CheckBroadcastDim(x: ArrayDesc, y: ArrayDesc, res: ArrayDesc, axis: i64Like) -> Unit: ...
+
+    @ruleset
+    def ruleset_broadcasting(x: ArrayDesc, y: ArrayDesc, z: ArrayDesc, nd: i64,
+                             dim: Dim, offset: i64, start: i64, nd_diff: i64):
+        yield rule(
+            # X has more dimension
+            z == (bc:=Broadcast(x, y)),
+            nd == x.ndim,
+            nd > y.ndim,
+            nd_diff == nd - y.ndim
+        ).then(
+            subsume(bc),
+            union(z).with_(Broadcast(x, ArrayAddDim(y, nd_diff))),
+        )
+
+        yield rule(
+            # X and Y has same ndim
+            z == Broadcast(x, y),
+            y.ndim == x.ndim,
+            nd == x.ndim
+        ).then(
+            CheckBroadcast(x, y, z),
+            set_(z.ndim).to(nd),
+        )
+
+        yield rewrite(
+            CheckBroadcast(x, y, z),
+            subsume=True,
+        ).to(
+            CheckBroadcastDim(x, y, z, 0)
+        )
+
+        yield rule(
+            CheckBroadcastDim(x, y, z, offset),
+            offset + 1 < z.ndim
+        ).then(
+            CheckBroadcastDim(x, y, z, offset + 1)
+        )
+
+        yield rule(
+            # same dim
+            delme:=CheckBroadcastDim(x, y, z, offset),
+            x.dim(offset) == y.dim(offset),
+            dim == x.dim(offset),
+        ).then(
+            delete(delme),
+            set_(z.dim(offset)).to(dim)
+        )
+        yield rule(
+            # not the same dim (left is 1)
+            delme:=CheckBroadcastDim(x, y, z, offset),
+            x.dim(offset) == Dim.fixed(1),
+            dim == y.dim(offset),
+        ).then(
+            delete(delme),
+            set_(z.dim(offset)).to(dim)
+        )
+        yield rule(
+            # not the same dim (right is 1)
+            delme:=CheckBroadcastDim(x, y, z, offset),
+            y.dim(offset) == Dim.fixed(1),
+            dim == x.dim(offset),
+        ).then(
+            delete(delme),
+            set_(z.dim(offset)).to(dim)
+        )
+
+        # Logic to add dimensions
+        yield rewrite(
+            ArrayAddDim(x, nd_diff),
+            subsume=True,
+        ).to(
+            ArrayAddDim(AddLeftDim(x, Dim.fixed(1)), nd_diff - 1),
+            nd_diff > 0,
+        )
+
+        yield rewrite(
+            ArrayAddDim(x, nd_diff),
+            subsume=True,
+        ).to(
+            x,
+            nd_diff == i64(0),
+        )
+
+        yield rule(
+            y == AddLeftDim(x, dim),
+            nd == x.ndim,
+        ).then(
+            set_(y.dim(0)).to(dim),
+            set_(y.ndim).to(nd + 1),
+            CopyDim(src=x, dst=y, start=1, offset=1),
+        )
+
+        yield rule(
+            delme := CopyDim(src=x, dst=y, start=start, offset=offset),
+            start < y.ndim,
+        ).then(
+            delete(delme),
+            set_(y.dim(start)).to(x.dim(start - offset)),
+            CopyDim(src=x, dst=y, start=start + 1, offset=offset),
+        )
+
+        yield rule(
+            delme := CopyDim(src=x, dst=y, offset=offset, start=start),
+            start >= y.ndim,
+        ).then(
+            delete(delme)
+        )
+
+    eg.run(ruleset_broadcasting.saturate())
+    if IN_NOTEBOOK:
+        eg.display(graphviz=True)
+
+    eg.check(broadcasted.dim(0) == Dim.symbolic("M"))
+    eg.check(broadcasted.dim(1) == Dim.symbolic("N"))
+    eg.check(broadcasted.dim(2) == Dim.fixed(10))
+    eg.check(broadcasted.dim(3) == Dim.fixed(4))
+
