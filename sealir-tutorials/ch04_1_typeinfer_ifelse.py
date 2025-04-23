@@ -803,6 +803,7 @@ class Grammar(grammar.Grammar):
 def my_attr_format(attrs: rg.Attrs) -> str:
     ins = {}
     outs = {}
+    others = []
     for attr in attrs.attrs:
         match attr:
             case NbOp_InTypeAttr(idx=int(idx), type=NbOp_Type(name=str(name))):
@@ -812,7 +813,7 @@ def my_attr_format(attrs: rg.Attrs) -> str:
             ):
                 outs[idx] = name
             case _:
-                assert False
+                others.append(attr)
 
     def format(dct):
         if len(dct):
@@ -822,7 +823,12 @@ def my_attr_format(attrs: rg.Attrs) -> str:
         else:
             return "()"
 
-    return format(ins) + "->" + format(outs)
+    outbuf = []
+    if ins or outs:
+        outbuf.append(format(ins) + "->" + format(outs))
+    for other in others:
+        outbuf.append(ase.pretty_str(other))
+    return ", ".join(outbuf)
 
 
 format_rvsdg = partial(rvsdg.format_rvsdg, format_attrs=my_attr_format)
