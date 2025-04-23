@@ -47,7 +47,7 @@ from sealir.rvsdg import grammar as rg
 from ch03_egraph_program_rewrites import (
     run_test,
 )
-from ch04_1_typeinfer_ifelse import Backend as Ch04_1_Backend
+from ch04_1_typeinfer_ifelse import Backend as _ch04_1_Backend
 from ch04_1_typeinfer_ifelse import (
     ExtendEGraphToRVSDG as _ch04_1_ExtendEGraphToRVSDG,
 )
@@ -199,7 +199,7 @@ class ExtendEGraphToRVSDG(_ch04_1_ExtendEGraphToRVSDG):
 # ### Extend the LLVM Backend from Ch4.1
 
 
-class Backend(Ch04_1_Backend):
+class Backend(_ch04_1_Backend):
 
     def lower_expr(self, expr, state):
         builder = state.builder
