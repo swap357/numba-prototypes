@@ -25,7 +25,7 @@
 #   - [Part 0 - Type inference for scalar operations](ch04_0_typeinfer_prelude.html)
 #   - [Part 1 - Fully typing a scalar function with if-else branch](ch04_1_typeinfer_ifelse.html)
 #   - [Part 2 - Fully typing a scalar function with loops](ch04_2_typeinfer_loops.html)
-# * Chapter 5 - Array Type Inference with EGraphs
+# * [Chapter 5 - Array Type Inference with EGraphs](ch05_typeinfer_array.html)
 # * Chapter 6 - MLIR Backend for Scalar Functions
 # * Chapter 7 - MLIR Backend for Array Functions
 # * Chapter 8 - MLIR Backend for Array Offload to the GPU
