@@ -1002,6 +1002,7 @@ class Attributes:
         for idx in range(1, self.num_input_types() + 1):
             yield self._typedins[idx].type
 
+
 # + [markdown] jp-MarkdownHeadingCollapsed=true
 # ### Extend LLVM Backend for the new operations
 

@@ -24,14 +24,12 @@ from traceback import print_exception
 from typing import Any, Callable
 
 import mlir.dialects.arith as arith
+import mlir.dialects.cf as cf
 import mlir.dialects.func as func
 import mlir.dialects.scf as scf
-import mlir.dialects.cf as cf
-
-import mlir.passmanager as passmanager
 import mlir.execution_engine as execution_engine
 import mlir.ir as ir
-
+import mlir.passmanager as passmanager
 from sealir import ase
 from sealir.rvsdg import grammar as rg
 from sealir.rvsdg import internal_prefix
@@ -39,13 +37,12 @@ from sealir.rvsdg import internal_prefix
 from ch03_egraph_program_rewrites import (
     run_test,
 )
+from ch04_1_typeinfer_ifelse import Attributes, CompilationError
 from ch04_1_typeinfer_ifelse import (
-    NbOp_Type,
-    Attributes,
-    SExpr,
-    compiler_pipeline, 
-    Int64,
     ExtendEGraphToRVSDG as ConditionalExtendGraphtoRVSDG,
+)
+from ch04_1_typeinfer_ifelse import (
+    Int64,
     MyCostModel,
     NbOp_Add_Float64,
     NbOp_Add_Int64,
@@ -55,20 +52,24 @@ from ch04_1_typeinfer_ifelse import (
     NbOp_Lt_Int64,
     NbOp_Sub_Float64,
     NbOp_Sub_Int64,
-    base_ruleset as if_else_ruleset,
+    NbOp_Type,
+    SExpr,
+)
+from ch04_1_typeinfer_ifelse import base_ruleset as if_else_ruleset
+from ch04_1_typeinfer_ifelse import (
+    compiler_pipeline,
     facts_function_types,
-    ruleset_type_infer_float,
     ruleset_failed_to_unify,
     ruleset_type_infer_failure_report,
-    CompilationError
+    ruleset_type_infer_float,
 )
 from ch04_2_typeinfer_loops import (
-    NbOp_Not_Int64,
-    base_ruleset as loop_ruleset,
-    ExtendEGraphToRVSDG as LoopExtendEGraphToRVSDG
+    ExtendEGraphToRVSDG as LoopExtendEGraphToRVSDG,
 )
-
+from ch04_2_typeinfer_loops import NbOp_Not_Int64
+from ch04_2_typeinfer_loops import base_ruleset as loop_ruleset
 from utils import IN_NOTEBOOK
+
 
 @dataclass(frozen=True)
 class LowerStates(ase.TraverseState):
@@ -76,6 +77,7 @@ class LowerStates(ase.TraverseState):
     get_region_args: Callable
     function_block: func.FuncOp
     constant_block: ir.Block
+
 
 class Backend:
     def lower_type(self, ty: NbOp_Type):
@@ -105,7 +107,11 @@ class Backend:
         module_body = ir.InsertionPoint(module.body)
         input_types = tuple([self.get_mlir_type(x) for x in argtypes])
 
-        output_types = (self.get_mlir_type(Attributes(root.body.begin.attrs).get_return_type(root.body)),)
+        output_types = (
+            self.get_mlir_type(
+                Attributes(root.body.begin.attrs).get_return_type(root.body)
+            ),
+        )
 
         with context, loc, module_body:
             fun = func.FuncOp("func", (input_types, output_types))
@@ -129,9 +135,18 @@ class Backend:
 
         def get_region_args():
             return region_args[-1]
-        
+
         with context, loc, function_entry:
-            memo = ase.traverse(root, self.lower_expr, LowerStates(push=push, get_region_args=get_region_args, function_block=fun, constant_block=constant_entry))
+            memo = ase.traverse(
+                root,
+                self.lower_expr,
+                LowerStates(
+                    push=push,
+                    get_region_args=get_region_args,
+                    function_block=fun,
+                    constant_block=constant_entry,
+                ),
+            )
 
         with context, loc, constant_entry:
             cf.br([], fun.body.blocks[1])
@@ -201,7 +216,7 @@ class Backend:
                 with state.constant_block:
                     const = arith.constant(self.i64, ival)
                 return const
-            
+
             case rg.PyBool(int(ival)):
                 with state.constant_block:
                     const = arith.constant(self.boo, ival)
@@ -251,7 +266,9 @@ class Backend:
                 lhs = yield lhs
                 rhs = yield rhs
 
-                return arith.divf(arith.sitofp(self.f64, lhs), arith.sitofp(self.f64, rhs))
+                return arith.divf(
+                    arith.sitofp(self.f64, lhs), arith.sitofp(self.f64, rhs)
+                )
             ##### more
             case NbOp_Not_Int64(operand):
                 # Implement unary not
@@ -263,13 +280,15 @@ class Backend:
             case rg.PyInt(val):
                 return arith.constant(self.i64, val)
 
-            case rg.IfElse(cond=cond, body=body, orelse=orelse, operands=operands):
-                condval = (yield cond)
+            case rg.IfElse(
+                cond=cond, body=body, orelse=orelse, operands=operands
+            ):
+                condval = yield cond
 
                 # process operands
                 rettys = Attributes(body.begin.attrs)
                 result_tys = []
-                for i in range(0, rettys.num_output_types()+1):
+                for i in range(0, rettys.num_output_types() + 1):
                     out_ty = rettys.get_output_type(i)
                     if out_ty is not None:
                         match out_ty.name:
@@ -282,7 +301,9 @@ class Backend:
                     else:
                         result_tys.append(self.i32)
 
-                if_op = scf.IfOp(cond=condval, results_= result_tys, hasElse=bool(orelse))
+                if_op = scf.IfOp(
+                    cond=condval, results_=result_tys, hasElse=bool(orelse)
+                )
 
                 with ir.InsertionPoint(if_op.then_block):
                     value_else = yield body
@@ -301,7 +322,7 @@ class Backend:
                     ops.append((yield op))
 
                 result_tys = []
-                for i in range(1, rettys.num_output_types()+1):
+                for i in range(1, rettys.num_output_types() + 1):
                     out_ty = rettys.get_output_type(i)
                     if out_ty is not None:
                         match out_ty.name:
@@ -314,15 +335,19 @@ class Backend:
                     else:
                         result_tys.append(self.i32)
 
-                while_op = scf.WhileOp(results_=result_tys, inits=[op for op in ops])
+                while_op = scf.WhileOp(
+                    results_=result_tys, inits=[op for op in ops]
+                )
                 before_block = while_op.before.blocks.append(*result_tys)
                 after_block = while_op.after.blocks.append(*result_tys)
                 new_ops = before_block.arguments
-    
+
                 # Before Region
                 with ir.InsertionPoint(before_block), state.push(new_ops):
                     values = yield body
-                    scf.ConditionOp(args=[val for val in values[1:]], condition=values[0])
+                    scf.ConditionOp(
+                        args=[val for val in values[1:]], condition=values[0]
+                    )
 
                 # After Region
                 with ir.InsertionPoint(after_block):
@@ -336,9 +361,17 @@ class Backend:
 
     def jit_compile(self, llmod, func_node: rg.Func):
         attributes = Attributes(func_node.body.begin.attrs)
-        input_types = tuple([self.get_mlir_type(x) for x in attributes.input_types()])
+        input_types = tuple(
+            [self.get_mlir_type(x) for x in attributes.input_types()]
+        )
 
-        output_types = (self.get_mlir_type(Attributes(func_node.body.begin.attrs).get_return_type(func_node.body)),)
+        output_types = (
+            self.get_mlir_type(
+                Attributes(func_node.body.begin.attrs).get_return_type(
+                    func_node.body
+                )
+            ),
+        )
         return JitCallable.from_pointer(llmod, input_types, output_types)
 
     def get_ctype(self, lltype: ir.Type):
@@ -356,23 +389,24 @@ class Backend:
 
 def get_exec_ptr(mlir_ty, val):
     if isinstance(mlir_ty, ir.IntegerType):
-        return ctypes.pointer(ctypes.c_int64(val)) 
+        return ctypes.pointer(ctypes.c_int64(val))
     elif isinstance(mlir_ty, ir.F32Type):
         return ctypes.pointer(ctypes.c_float(val))
     elif isinstance(mlir_ty, ir.F64Type):
         return ctypes.pointer(ctypes.c_double(val))
+
 
 @dataclass(frozen=True)
 class JitCallable:
     jit_func: Callable
 
     @classmethod
-    def from_pointer(
-        cls, jit_module, input_types, output_types
-    ):
+    def from_pointer(cls, jit_module, input_types, output_types):
         engine = execution_engine.ExecutionEngine(jit_module)
 
-        assert len(output_types) == 1, "Execution of functions with output arguments > 1 not supported" 
+        assert (
+            len(output_types) == 1
+        ), "Execution of functions with output arguments > 1 not supported"
         res_ptr = get_exec_ptr(output_types[0], 0)
 
         def jit_func(*input_args):
@@ -380,8 +414,11 @@ class JitCallable:
             for arg, arg_ty in zip(input_args, input_types):
                 # assert isinstance(arg, arg_ty)
                 # TODO: Assert types here
-                pass              
-            input_exec_ptrs = [get_exec_ptr(ty, val) for ty, val in zip(input_types, input_args)]
+                pass
+            input_exec_ptrs = [
+                get_exec_ptr(ty, val)
+                for ty, val in zip(input_types, input_args)
+            ]
             engine.invoke("func", *input_exec_ptrs, res_ptr)
 
             return res_ptr.contents.value
@@ -390,6 +427,7 @@ class JitCallable:
 
     def __call__(self, *args: Any) -> Any:
         return self.jit_func(*args)
+
 
 # + [markdown] jp-MarkdownHeadingCollapsed=true
 # Example 1: simple if-else

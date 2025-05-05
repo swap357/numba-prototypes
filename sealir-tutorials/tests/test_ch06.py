@@ -3,7 +3,6 @@ from sealir import ase
 from ch06_mlir_backend import *
 
 
-
 def test_ch06_example_1():
     jt = compiler_pipeline(
         example_1,
@@ -61,6 +60,7 @@ def test_ch06_example_3():
         # This indicates that the type inference is incomplete
         print_exception(e)
         assert "fail to unify" in str(e)
+
 
 def test_ch06_example_4():
     jt = compiler_pipeline(
