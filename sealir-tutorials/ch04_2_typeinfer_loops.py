@@ -67,10 +67,10 @@ from ch04_1_typeinfer_ifelse import (
 from ch04_1_typeinfer_ifelse import base_ruleset as _ch4_1_base_ruleset
 from ch04_1_typeinfer_ifelse import (
     compiler_pipeline,
-    facts_function_types,
     ruleset_failed_to_unify,
     ruleset_type_infer_failure_report,
     ruleset_type_infer_float,
+    setup_argtypes,
 )
 
 # ## Define type inference for loop regions
@@ -269,7 +269,6 @@ class Backend(_ch04_1_Backend):
 
 base_ruleset = (
     _ch4_1_base_ruleset
-    | facts_function_types
     | ruleset_type_infer_float
     | ruleset_failed_to_unify
     | ruleset_type_infer_failure_report
@@ -294,7 +293,7 @@ if __name__ == "__main__":
     jt = compiler_pipeline(
         example_1,
         argtypes=(Int64, Int64),
-        ruleset=base_ruleset,
+        ruleset=base_ruleset | setup_argtypes(TypeInt64, TypeInt64),
         verbose=True,
         converter_class=ExtendEGraphToRVSDG,
         cost_model=MyCostModel(),
@@ -322,7 +321,7 @@ if __name__ == "__main__":
     jt = compiler_pipeline(
         example_2,
         argtypes=(Int64, Int64),
-        ruleset=base_ruleset,
+        ruleset=base_ruleset | setup_argtypes(TypeInt64, TypeInt64),
         verbose=True,
         converter_class=ExtendEGraphToRVSDG,
         cost_model=MyCostModel(),

@@ -353,30 +353,36 @@ def ruleset_type_infer_add():
 # Define argument types and their propagations:
 
 
-@ruleset
-def facts_function_types(
-    outports: Vec[Port],
-    func_uid: String,
-    reg_uid: String,
-    fname: String,
-    region: Region,
-):
-    yield rule(
-        # This match the function at graph root
-        GraphRoot(
-            Term.Func(
-                body=Term.RegionEnd(region=region, ports=PortList(outports)),
-                uid=func_uid,
-                fname=fname,
-            )
-        ),
-        region == Region(uid=reg_uid, inports=_wc(InPorts)),
-    ).then(
-        # The first argument is Int64
-        set_(TypedIns(region).arg(1).getType()).to(TypeInt64),
-        # The second argument is Int64
-        set_(TypedIns(region).arg(2).getType()).to(TypeInt64),
-    )
+def setup_argtypes(*argtypes):
+    def rule_gen(region):
+        return [
+            set_(TypedIns(region).arg(i).getType()).to(ty)
+            for i, ty in enumerate(argtypes, start=1)
+        ]
+
+    @ruleset
+    def facts_function_types(
+        outports: Vec[Port],
+        func_uid: String,
+        reg_uid: String,
+        fname: String,
+        region: Region,
+    ):
+        yield rule(
+            # This match the function at graph root
+            GraphRoot(
+                Term.Func(
+                    body=Term.RegionEnd(
+                        region=region, ports=PortList(outports)
+                    ),
+                    uid=func_uid,
+                    fname=fname,
+                )
+            ),
+            region == Region(uid=reg_uid, inports=_wc(InPorts)),
+        ).then(*rule_gen(region))
+
+    return facts_function_types
 
 
 # Associate type variables to region inputs/outputs.
@@ -434,7 +440,7 @@ if __name__ == "__main__":
             | ruleset_region_types
             | ruleset_type_basic
             | ruleset_type_infer_add
-            | facts_function_types
+            | setup_argtypes(TypeInt64, TypeInt64)
         )
         egraph.run(rules.saturate())
         if IN_NOTEBOOK:
@@ -512,8 +518,7 @@ def compiler_pipeline(
         if verbose and IN_NOTEBOOK:
             # For inspecting the egraph
             egraph.display(graphviz=True)
-        # egraph.display()
-
+        print(egraph.extract(root))
         # Use egglog's default extractor to get the error messages
         errmsgs = map(
             lambda x: x.eval(), egraph.extract_multiple(errors, n=10)
@@ -937,7 +942,8 @@ class MyCostModel(CostModel):
     def get_cost_function(self, nodename, op, ty, cost, nodes, child_costs):
         if op.startswith("Py_"):
             # Penalize Python operations
-            return float("inf")
+            # return float("inf")
+            return float(1e99)
 
         # Fallthrough to parent's cost function
         return super().get_cost_function(
@@ -1307,7 +1313,7 @@ if __name__ == "__main__":
     jt = compiler_pipeline(
         example_1,
         argtypes=(Int64, Int64),
-        ruleset=(base_ruleset | facts_function_types),
+        ruleset=(base_ruleset | setup_argtypes(TypeInt64, TypeInt64)),
         verbose=True,
         converter_class=ExtendEGraphToRVSDG,
         cost_model=MyCostModel(),
@@ -1363,7 +1369,7 @@ if __name__ == "__main__":
         argtypes=(Int64, Int64),
         ruleset=(
             base_ruleset
-            | facts_function_types
+            | setup_argtypes(TypeInt64, TypeInt64)
             | ruleset_type_infer_float  # < --- added for float()
         ),
         verbose=True,
@@ -1408,7 +1414,7 @@ if __name__ == "__main__":
             argtypes=(Int64, Int64),
             ruleset=(
                 base_ruleset
-                | facts_function_types
+                | setup_argtypes(TypeInt64, TypeInt64)
                 | ruleset_type_infer_float
                 | ruleset_failed_to_unify
             ),
@@ -1467,7 +1473,7 @@ if __name__ == "__main__":
             argtypes=(Int64, Int64),
             ruleset=(
                 base_ruleset
-                | facts_function_types
+                | setup_argtypes(TypeInt64, TypeInt64)
                 | ruleset_type_infer_float
                 | ruleset_failed_to_unify
                 | ruleset_type_infer_failure_report
