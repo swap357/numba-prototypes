@@ -254,14 +254,15 @@ def compiler_pipeline(fn, *, verbose=False):
     return jt
 
 
-def run_test(fn, jt, args, *, verbose=False):
+def run_test(fn, jt, args, *, verbose=False, equal=lambda x, y: x == y):
     res = jt(*args)
 
     if verbose:
         print("JIT: output".center(80, "="))
         print(res)
 
-    assert res == fn(*args)
+    got = fn(*args)
+    assert equal(res, got), (res, got)
     return res
 
 
@@ -278,4 +279,4 @@ if __name__ == "__main__":
         return c
 
     jt = compiler_pipeline(sum_ints, verbose=True)
-    run_test(sum_ints, jt, (12,), verbose=True)
+    run_test(sum_ints, jt, (12,), verbose=True, rtol=1e-6)
