@@ -86,6 +86,13 @@ class LowerStates(ase.TraverseState):
 
 
 class Backend:
+    def __init__(self):
+        self.context = context = ir.Context()
+        self.f64 = ir.F64Type.get(context=context)
+        self.i32 = ir.IntegerType.get_signless(32, context=context)
+        self.i64 = ir.IntegerType.get_signless(64, context=context)
+        self.boo = ir.IntegerType.get_signless(1, context=context)
+
     def lower_type(self, ty: NbOp_Type):
         match ty:
             case NbOp_Type("Int64"):
@@ -100,15 +107,9 @@ class Backend:
                 return self.f64
 
     def lower(self, root: rg.Func, argtypes):
-        self.context = context = ir.Context()
+        context = self.context
         self.loc = loc = ir.Location.unknown(context=context)
         self.module = module = ir.Module.create(loc=loc)
-
-        # f32 = ir.F32Type.get(context=context)
-        self.f64 = ir.F64Type.get(context=context)
-        self.i32 = ir.IntegerType.get_signless(32, context=context)
-        self.i64 = ir.IntegerType.get_signless(64, context=context)
-        self.boo = ir.IntegerType.get_signless(1, context=context)
 
         module_body = ir.InsertionPoint(module.body)
         input_types = tuple([self.get_mlir_type(x) for x in argtypes])
@@ -158,13 +159,15 @@ class Backend:
             cf.br([], fun.body.blocks[1])
 
         module.dump()
+        return self.run_passes(module, context)
+
+    def run_passes(self, module, context):
         pass_man = passmanager.PassManager(context=context)
         pass_man.add("convert-scf-to-cf")
         pass_man.add("convert-func-to-llvm")
         pass_man.enable_verifier(True)
         pass_man.run(module.operation)
         module.dump()
-
         return module
 
     def lower_expr(self, expr: SExpr, state: LowerStates):
