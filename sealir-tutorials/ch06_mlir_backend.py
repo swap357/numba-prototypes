@@ -551,7 +551,7 @@ if __name__ == "__main__":
     jt = compiler_pipeline(
         example_4,
         argtypes=(Int64, Int64),
-        ruleset=loop_ruleset,
+        ruleset=loop_ruleset | facts_function_types,
         verbose=True,
         converter_class=LoopExtendEGraphToRVSDG,
         cost_model=MyCostModel(),
@@ -579,7 +579,7 @@ if __name__ == "__main__":
     jt = compiler_pipeline(
         example_5,
         argtypes=(Int64, Int64),
-        ruleset=loop_ruleset,
+        ruleset=loop_ruleset| facts_function_types,
         verbose=True,
         converter_class=LoopExtendEGraphToRVSDG,
         cost_model=MyCostModel(),

@@ -384,7 +384,7 @@ def setup_argtypes(*argtypes):
 
     return facts_function_types
 
-
+facts_function_types = setup_argtypes(TypeInt64, TypeInt64)
 # Associate type variables to region inputs/outputs.
 
 
