@@ -37,7 +37,7 @@ from sealir.rvsdg import internal_prefix
 from ch03_egraph_program_rewrites import (
     run_test,
 )
-from ch04_1_typeinfer_ifelse import Attributes, CompilationError
+from ch04_1_typeinfer_ifelse import Attributes
 from ch04_1_typeinfer_ifelse import (
     ExtendEGraphToRVSDG as ConditionalExtendGraphtoRVSDG,
 )
@@ -59,8 +59,6 @@ from ch04_1_typeinfer_ifelse import base_ruleset as if_else_ruleset
 from ch04_1_typeinfer_ifelse import (
     compiler_pipeline,
     facts_function_types,
-    ruleset_failed_to_unify,
-    ruleset_type_infer_failure_report,
     ruleset_type_infer_float,
 )
 from ch04_2_typeinfer_loops import (
@@ -78,14 +76,9 @@ class LowerStates(ase.TraverseState):
     function_block: func.FuncOp
     constant_block: ir.Block
 
+function_name = "func"
 
 class Backend:
-    def lower_type(self, ty: NbOp_Type):
-        match ty:
-            case NbOp_Type("Int64"):
-                return ir.IntType(64)
-        raise NotImplementedError(f"unknown type: {ty}")
-
     def get_mlir_type(self, seal_ty):
         match seal_ty.name:
             case "Int64":
@@ -98,15 +91,16 @@ class Backend:
         self.loc = loc = ir.Location.unknown(context=context)
         self.module = module = ir.Module.create(loc=loc)
 
-        # f32 = ir.F32Type.get(context=context)
         self.f64 = ir.F64Type.get(context=context)
         self.i32 = ir.IntegerType.get_signless(32, context=context)
         self.i64 = ir.IntegerType.get_signless(64, context=context)
         self.boo = ir.IntegerType.get_signless(1, context=context)
 
+        # Get the module body pointer so we can insert content into the
+        # module.
         module_body = ir.InsertionPoint(module.body)
+        # Convert SealIR types to MLIR types.
         input_types = tuple([self.get_mlir_type(x) for x in argtypes])
-
         output_types = (
             self.get_mlir_type(
                 Attributes(root.body.begin.attrs).get_return_type(root.body)
@@ -114,12 +108,20 @@ class Backend:
         )
 
         with context, loc, module_body:
-            fun = func.FuncOp("func", (input_types, output_types))
+            # Constuct a function that emits a callable C-interface.  
+            fun = func.FuncOp(function_name, (input_types, output_types))
             fun.attributes["llvm.emit_c_interface"] = ir.UnitAttr.get()
+
+            # Define two blocks within the function, a constant block to
+            # define all the constants and a function block for the
+            # actual content. This is done to prevent non-dominant use
+            # of constants. (Use of a constant when declaration is done in
+            # a region that isn't initialized.)
             const_block = fun.add_entry_block()
             fun.body.blocks.append(*[], arg_locs=None)
             func_block = fun.body.blocks[1]
 
+        # Define entry points of both the blocks.
         constant_entry = ir.InsertionPoint(const_block)
         function_entry = ir.InsertionPoint(func_block)
 
@@ -148,15 +150,21 @@ class Backend:
                 ),
             )
 
+        # Use a break to jump from the constant block to the function block.
+        # note that this is being inserted at end of constant block after the
+        # Function construction when all the constants have been initialized.
         with context, loc, constant_entry:
             cf.br([], fun.body.blocks[1])
 
         module.dump()
+
+        # MLIR internal passmanager
         pass_man = passmanager.PassManager(context=context)
         pass_man.add("convert-scf-to-cf")
         pass_man.add("convert-func-to-llvm")
         pass_man.enable_verifier(True)
         pass_man.run(module.operation)
+        # Output LLVM-dialect MLIR
         module.dump()
 
         return module
@@ -181,7 +189,6 @@ class Backend:
 
                 portnames = [p.name for p in body.ports]
                 retval = outs[portnames.index(internal_prefix("ret"))]
-                global func
                 func.ReturnOp([retval])
             case rg.RegionBegin(inports=ins):
                 portvalues = []
@@ -361,6 +368,7 @@ class Backend:
 
     def jit_compile(self, llmod, func_node: rg.Func):
         attributes = Attributes(func_node.body.begin.attrs)
+        # Convert SealIR types into MLIR types
         input_types = tuple(
             [self.get_mlir_type(x) for x in attributes.input_types()]
         )
@@ -372,19 +380,8 @@ class Backend:
                 )
             ),
         )
+        # Converts the MLIR module into a JIT-callable function.
         return JitCallable.from_pointer(llmod, input_types, output_types)
-
-    def get_ctype(self, lltype: ir.Type):
-        match lltype:
-            case ir.IntegerType():
-                match lltype.width:
-                    case 64:
-                        return ctypes.c_int64
-            case ir.F32Type():
-                return ctypes.c_float
-            case ir.F64Type():
-                return ctypes.c_double
-        raise NotImplementedError(lltype)
 
 
 def get_exec_ptr(mlir_ty, val):
@@ -402,6 +399,7 @@ class JitCallable:
 
     @classmethod
     def from_pointer(cls, jit_module, input_types, output_types):
+        # Use MLIR's own internal execution engine
         engine = execution_engine.ExecutionEngine(jit_module)
 
         assert (
@@ -409,17 +407,26 @@ class JitCallable:
         ), "Execution of functions with output arguments > 1 not supported"
         res_ptr = get_exec_ptr(output_types[0], 0)
 
+        # Build a wrapper function
         def jit_func(*input_args):
             assert len(input_args) == len(input_types)
             for arg, arg_ty in zip(input_args, input_types):
                 # assert isinstance(arg, arg_ty)
                 # TODO: Assert types here
                 pass
+            # Transform the input arguments into C-types
+            # with their respective values. All inputs to
+            # the internal execution engine should
+            # be C-Type pointers.
             input_exec_ptrs = [
                 get_exec_ptr(ty, val)
                 for ty, val in zip(input_types, input_args)
             ]
-            engine.invoke("func", *input_exec_ptrs, res_ptr)
+            # Invokes the function that we built, internally calls
+            # _mlir_ciface_function_name as a void pointer with the given
+            # input pointers, there can only be one resulting pointer
+            # appended to the end of all input pointers in the invoke call.
+            engine.invoke(function_name, *input_exec_ptrs, res_ptr)
 
             return res_ptr.contents.value
 
@@ -491,58 +498,42 @@ if __name__ == "__main__":
     args = (7, 3)
     run_test(example_2, jt, args, verbose=True)
 
-# ## Example 3: unify mismatching type
-#
-# What if type of `z` does not match across the branch?
+# ## Example 3: Simple while loop example
 
 
-def example_3(a, b):
-    if a > b:
-        z = a - b  # this as int
-    else:
-        z = float(b) - 1 / a  # this is float
-    return z - float(a)
-
-
-# Add rules to signal error
-
-# ## Example 4: Improve error reporting
-#
-# Add logics to report error early
+def example_3(init, n):
+    c = float(init)
+    i = 0
+    while i < n:
+        c = c + float(i)
+        i = i + 1
+    return c
 
 
 if __name__ == "__main__":
-
-    try:
-        compiler_pipeline(
-            example_3,
-            argtypes=(Int64, Int64),
-            ruleset=(
-                if_else_ruleset
-                | facts_function_types
-                | ruleset_type_infer_float
-                | ruleset_failed_to_unify
-                | ruleset_type_infer_failure_report
-            ),
-            verbose=True,
-            converter_class=ConditionalExtendGraphtoRVSDG,
-            cost_model=MyCostModel(),
-            backend=Backend(),
-        )
-
-    except CompilationError as e:
-        print_exception(e)
-        assert "Failed to unify if-else outgoing variables: z" in str(e)
+    jt = compiler_pipeline(
+        example_3,
+        argtypes=(Int64, Int64),
+        ruleset=loop_ruleset,
+        verbose=True,
+        converter_class=LoopExtendEGraphToRVSDG,
+        cost_model=MyCostModel(),
+        backend=Backend(),
+    )
+    run_test(example_3, jt, (10, 7), verbose=True)
 
 
-# ## Example 4: Simple while loop example
+# ## Example 4: Nested Loop example
 
 
 def example_4(init, n):
     c = float(init)
     i = 0
     while i < n:
-        c = c + float(i)
+        j = 0
+        while j < i:
+            c = c + float(j)
+            j = j + 1
         i = i + 1
     return c
 
@@ -558,31 +549,3 @@ if __name__ == "__main__":
         backend=Backend(),
     )
     run_test(example_4, jt, (10, 7), verbose=True)
-
-
-# ## Example 5: Nested Loop example
-
-
-def example_5(init, n):
-    c = float(init)
-    i = 0
-    while i < n:
-        j = 0
-        while j < i:
-            c = c + float(j)
-            j = j + 1
-        i = i + 1
-    return c
-
-
-if __name__ == "__main__":
-    jt = compiler_pipeline(
-        example_5,
-        argtypes=(Int64, Int64),
-        ruleset=loop_ruleset,
-        verbose=True,
-        converter_class=LoopExtendEGraphToRVSDG,
-        cost_model=MyCostModel(),
-        backend=Backend(),
-    )
-    run_test(example_5, jt, (10, 7), verbose=True)

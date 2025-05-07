@@ -40,26 +40,16 @@ def test_ch06_example_2():
 
 
 def test_ch06_example_3():
-    try:
-        compiler_pipeline(
-            example_3,
-            argtypes=(Int64, Int64),
-            ruleset=(
-                if_else_ruleset
-                | facts_function_types
-                | ruleset_type_infer_float
-                | ruleset_failed_to_unify
-            ),
-            verbose=False,
-            converter_class=ConditionalExtendGraphtoRVSDG,
-            cost_model=MyCostModel(),
-            backend=Backend(),
-        )
-    except CompilationError as e:
-        # Compilation failed because the return type cannot be determined.
-        # This indicates that the type inference is incomplete
-        print_exception(e)
-        assert "fail to unify" in str(e)
+    jt = compiler_pipeline(
+        example_3,
+        argtypes=(Int64, Int64),
+        ruleset=loop_ruleset,
+        verbose=False,
+        converter_class=LoopExtendEGraphToRVSDG,
+        cost_model=MyCostModel(),
+        backend=Backend(),
+    )
+    run_test(example_3, jt, (10, 7), verbose=False)
 
 
 def test_ch06_example_4():
@@ -73,16 +63,3 @@ def test_ch06_example_4():
         backend=Backend(),
     )
     run_test(example_4, jt, (10, 7), verbose=False)
-
-
-def test_ch06_example_5():
-    jt = compiler_pipeline(
-        example_5,
-        argtypes=(Int64, Int64),
-        ruleset=loop_ruleset,
-        verbose=False,
-        converter_class=LoopExtendEGraphToRVSDG,
-        cost_model=MyCostModel(),
-        backend=Backend(),
-    )
-    run_test(example_5, jt, (10, 7), verbose=False)
