@@ -7,7 +7,7 @@ def test_ch04_1_example_1():
     jt = compiler_pipeline(
         example_1,
         argtypes=(Int64, Int64),
-        ruleset=(base_ruleset | facts_function_types),
+        ruleset=(base_ruleset | setup_argtypes(TypeInt64, TypeInt64)),
         verbose=False,
         converter_class=ExtendEGraphToRVSDG,
         cost_model=MyCostModel(),
@@ -25,7 +25,7 @@ def test_ch04_1_example_2():
         argtypes=(Int64, Int64),
         ruleset=(
             base_ruleset
-            | facts_function_types
+            | setup_argtypes(TypeInt64, TypeInt64)
             | ruleset_type_infer_float  # < --- added for float()
         ),
         verbose=False,
@@ -46,7 +46,7 @@ def test_ch04_1_example_3():
             argtypes=(Int64, Int64),
             ruleset=(
                 base_ruleset
-                | facts_function_types
+                | setup_argtypes(TypeInt64, TypeInt64)
                 | ruleset_type_infer_float
                 | ruleset_failed_to_unify
             ),
@@ -69,7 +69,7 @@ def test_ch04_1_example_4():
             argtypes=(Int64, Int64),
             ruleset=(
                 base_ruleset
-                | facts_function_types
+                | setup_argtypes(TypeInt64, TypeInt64)
                 | ruleset_type_infer_float
                 | ruleset_failed_to_unify
                 | ruleset_type_infer_failure_report

@@ -37,6 +37,7 @@ from egglog import (
     Vec,
     birewrite,
     eq,
+    f64,
     function,
     i64,
     i64Like,
@@ -319,9 +320,9 @@ def Nb_Add_Float64(lhs: Term, rhs: Term) -> Term: ...
 # Helper for binary operations
 
 
-def make_rule_for_binop(binop, lhs_type, rhs_type, typedop, res_type):
+def make_rules_for_binop(binop, lhs_type, rhs_type, typedop, res_type):
     io, lhs, rhs, op = vars_("io lhs rhs op", Term)
-    return rule(
+    yield rule(
         op == binop(io, lhs, rhs),
         TypeVar(lhs).getType() == lhs_type,
         TypeVar(rhs).getType() == rhs_type,
@@ -330,8 +331,11 @@ def make_rule_for_binop(binop, lhs_type, rhs_type, typedop, res_type):
         union(op.getPort(1)).with_(typedop(lhs, rhs)),
         # shortcut io
         union(op.getPort(0)).with_(io),
+    )
+
+    yield rule(op == typedop(lhs, rhs)).then(
         # output type
-        set_(TypeVar(op.getPort(1)).getType()).to(res_type),
+        set_(TypeVar(op).getType()).to(res_type),
     )
 
 
@@ -341,11 +345,11 @@ def make_rule_for_binop(binop, lhs_type, rhs_type, typedop, res_type):
 @ruleset
 def ruleset_type_infer_add():
     # Int64 + Int64 -> Int64
-    yield make_rule_for_binop(
+    yield from make_rules_for_binop(
         Py_AddIO, TypeInt64, TypeInt64, Nb_Add_Int64, TypeInt64
     )
     # Float64 + Float64 -> Float64
-    yield make_rule_for_binop(
+    yield from make_rules_for_binop(
         Py_AddIO, TypeFloat64, TypeFloat64, Nb_Add_Float64, TypeFloat64
     )
 
@@ -361,7 +365,7 @@ def setup_argtypes(*argtypes):
         ]
 
     @ruleset
-    def facts_function_types(
+    def arg_rules(
         outports: Vec[Port],
         func_uid: String,
         reg_uid: String,
@@ -382,9 +386,9 @@ def setup_argtypes(*argtypes):
             region == Region(uid=reg_uid, inports=_wc(InPorts)),
         ).then(*rule_gen(region))
 
-    return facts_function_types
+    return arg_rules
 
-facts_function_types = setup_argtypes(TypeInt64, TypeInt64)
+
 # Associate type variables to region inputs/outputs.
 
 
@@ -579,25 +583,25 @@ def Nb_CastToFloat(arg: Term) -> Term: ...
 
 @ruleset
 def ruleset_type_infer_gt(io: Term, x: Term, y: Term, op: Term):
-    yield make_rule_for_binop(
+    yield from make_rules_for_binop(
         Py_GtIO, TypeInt64, TypeInt64, Nb_Gt_Int64, TypeBool
     )
 
 
 @ruleset
 def ruleset_type_infer_lt(io: Term, x: Term, y: Term, op: Term):
-    yield make_rule_for_binop(
+    yield from make_rules_for_binop(
         Py_LtIO, TypeInt64, TypeInt64, Nb_Lt_Int64, TypeBool
     )
 
 
 @ruleset
 def ruleset_type_infer_sub(io: Term, x: Term, y: Term, op: Term):
-    yield make_rule_for_binop(
+    yield from make_rules_for_binop(
         Py_SubIO, TypeInt64, TypeInt64, Nb_Sub_Int64, TypeInt64
     )
 
-    yield make_rule_for_binop(
+    yield from make_rules_for_binop(
         Py_SubIO, TypeFloat64, TypeFloat64, Nb_Sub_Float64, TypeFloat64
     )
 
@@ -623,9 +627,12 @@ def ruleset_type_infer_sub(io: Term, x: Term, y: Term, op: Term):
 #         subsume(Py_SubIO(io, x, y)),
 #     )
 @ruleset
-def ruleset_type_infer_literals(op: Term, ival: i64):
+def ruleset_type_infer_literals(op: Term, ival: i64, fval: f64):
     yield rule(op == Term.LiteralI64(ival)).then(
         set_(TypeVar(op).getType()).to(TypeInt64)
+    )
+    yield rule(op == Term.LiteralF64(fval)).then(
+        set_(TypeVar(op).getType()).to(TypeFloat64)
     )
 
 
@@ -641,7 +648,7 @@ def ruleset_typeinfer_cast(op: Term, val: Term):
 
 @ruleset
 def ruleset_type_infer_div(io: Term, x: Term, y: Term, op: Term):
-    yield make_rule_for_binop(
+    yield from make_rules_for_binop(
         Py_DivIO, TypeInt64, TypeInt64, Nb_Div_Int64, TypeFloat64
     )
 
@@ -943,7 +950,7 @@ class MyCostModel(CostModel):
         if op.startswith("Py_"):
             # Penalize Python operations
             # return float("inf")
-            return float(1e99)
+            return float(1e9999)
 
         # Fallthrough to parent's cost function
         return super().get_cost_function(

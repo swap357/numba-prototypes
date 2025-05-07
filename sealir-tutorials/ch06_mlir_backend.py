@@ -37,7 +37,10 @@ from sealir.rvsdg import internal_prefix
 from ch03_egraph_program_rewrites import (
     run_test,
 )
-from ch04_1_typeinfer_ifelse import Attributes, CompilationError
+from ch04_1_typeinfer_ifelse import (
+    Attributes,
+    CompilationError,
+)
 from ch04_1_typeinfer_ifelse import (
     ExtendEGraphToRVSDG as ConditionalExtendGraphtoRVSDG,
 )
@@ -54,19 +57,22 @@ from ch04_1_typeinfer_ifelse import (
     NbOp_Sub_Int64,
     NbOp_Type,
     SExpr,
+    TypeInt64,
 )
 from ch04_1_typeinfer_ifelse import base_ruleset as if_else_ruleset
 from ch04_1_typeinfer_ifelse import (
     compiler_pipeline,
-    facts_function_types,
     ruleset_failed_to_unify,
     ruleset_type_infer_failure_report,
     ruleset_type_infer_float,
+    setup_argtypes,
 )
 from ch04_2_typeinfer_loops import (
     ExtendEGraphToRVSDG as LoopExtendEGraphToRVSDG,
 )
-from ch04_2_typeinfer_loops import NbOp_Not_Int64
+from ch04_2_typeinfer_loops import (
+    NbOp_Not_Int64,
+)
 from ch04_2_typeinfer_loops import base_ruleset as loop_ruleset
 from utils import IN_NOTEBOOK
 
@@ -446,7 +452,7 @@ if __name__ == "__main__":
     jt = compiler_pipeline(
         example_1,
         argtypes=(Int64, Int64),
-        ruleset=(if_else_ruleset | facts_function_types),
+        ruleset=(if_else_ruleset | setup_argtypes(TypeInt64, TypeInt64)),
         verbose=True,
         converter_class=ConditionalExtendGraphtoRVSDG,
         cost_model=MyCostModel(),
@@ -478,7 +484,7 @@ if __name__ == "__main__":
         argtypes=(Int64, Int64),
         ruleset=(
             if_else_ruleset
-            | facts_function_types
+            | setup_argtypes(TypeInt64, TypeInt64)
             | ruleset_type_infer_float  # < --- added for float()
         ),
         verbose=True,
@@ -519,7 +525,7 @@ if __name__ == "__main__":
             argtypes=(Int64, Int64),
             ruleset=(
                 if_else_ruleset
-                | facts_function_types
+                | setup_argtypes(TypeInt64, TypeInt64)
                 | ruleset_type_infer_float
                 | ruleset_failed_to_unify
                 | ruleset_type_infer_failure_report
@@ -551,7 +557,7 @@ if __name__ == "__main__":
     jt = compiler_pipeline(
         example_4,
         argtypes=(Int64, Int64),
-        ruleset=loop_ruleset | facts_function_types,
+        ruleset=loop_ruleset | setup_argtypes(TypeInt64, TypeInt64),
         verbose=True,
         converter_class=LoopExtendEGraphToRVSDG,
         cost_model=MyCostModel(),
@@ -579,7 +585,7 @@ if __name__ == "__main__":
     jt = compiler_pipeline(
         example_5,
         argtypes=(Int64, Int64),
-        ruleset=loop_ruleset| facts_function_types,
+        ruleset=loop_ruleset | setup_argtypes(TypeInt64, TypeInt64),
         verbose=True,
         converter_class=LoopExtendEGraphToRVSDG,
         cost_model=MyCostModel(),
