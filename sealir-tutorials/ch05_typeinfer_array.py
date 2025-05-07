@@ -75,6 +75,7 @@ from ch04_2_typeinfer_loops import (
     TypeVar,
     base_ruleset,
     compiler_pipeline,
+    setup_argtypes,
 )
 from utils import IN_NOTEBOOK
 
@@ -237,38 +238,36 @@ array_1d_symbolic = NbOp_ArrayType(
 # ### Define egraph rules for the array operation
 
 
-@ruleset
-def facts_function_types(
-    outports: Vec[Port],
-    func_uid: String,
-    reg_uid: String,
-    fname: String,
-    region: Region,
+def array_desc_rules(
+    uid: str, shape: tuple[int | str, ...], dtype: Type, layout: str
 ):
-    array_int64_1d = ArrayDesc(uid="array_int64_1d")
-    yield rule(array_int64_1d).then(
-        set_(array_int64_1d.ndim).to(i64(1)),
-        set_(array_int64_1d.dim(0)).to(Dim.symbolic("n")),
-        set_(array_int64_1d.dtype).to(TypeInt64),
-        set_(array_int64_1d.dataLayout).to(DataLayout.c_contiguous()),
-    )
+    desc = ArrayDesc(uid=uid)
+    rules = []
+    rules.append(set_(desc.ndim).to(i64(len(shape))))
+    for i, d in enumerate(shape):
+        match d:
+            case str(k):
+                dim = Dim.symbolic(k)
+            case int(n):
+                dim = Dim.fixed(n)
+            case _:
+                raise ValueError
+        rules.append(set_(desc.dim(i)).to(dim))
 
-    yield rule(
-        # This match the function at graph root
-        GraphRoot(
-            Term.Func(
-                body=Term.RegionEnd(region=region, ports=PortList(outports)),
-                uid=func_uid,
-                fname=fname,
-            )
-        ),
-        region == Region(uid=reg_uid, inports=_wc(InPorts)),
-    ).then(
-        # The first argument is Array[dtype=Int64, ndim=1]
-        set_(TypedIns(region).arg(1).getType()).to(array_int64_1d.toType()),
-        # The second argument is Int64
-        set_(TypedIns(region).arg(2).getType()).to(TypeInt64),
-    )
+    match layout.lower():
+        case "c":
+            dl = DataLayout.c_contiguous()
+        case "f":
+            dl = DataLayout.fortran_contiguous()
+        case "s":
+            dl = DataLayout.strided()
+        case _:
+            raise ValueError
+    rules.append(set_(desc.dataLayout).to(dl))
+    rules.append(set_(desc.dtype).to(dtype))
+
+    the_rule = rule(desc).then(*rules)
+    return desc, [the_rule]
 
 
 @ruleset
@@ -399,6 +398,10 @@ class CtypeInt64Array1D(ctypes.Structure):
     _fields_ = [("ptr", ctypes.c_void_p), ("shape", (ctypes.c_uint64 * 1))]
 
 
+array_int64_1d, array_infos = array_desc_rules(
+    "array_int64_1d", shape=("n",), dtype=TypeInt64, layout="c"
+)
+
 if __name__ == "__main__":
     # compile
     jt = compiler_pipeline(
@@ -406,7 +409,8 @@ if __name__ == "__main__":
         argtypes=(array_1d_symbolic, Int64),
         ruleset=(
             base_ruleset
-            | facts_function_types
+            | setup_argtypes(array_int64_1d.toType(), TypeInt64)
+            | ruleset(*array_infos)
             | ruleset_typeinfer_array_getitem
         ),
         verbose=True,
@@ -448,7 +452,8 @@ if __name__ == "__main__":
         argtypes=(array_1d_symbolic, Int64),
         ruleset=(
             base_ruleset
-            | facts_function_types
+            | setup_argtypes(array_int64_1d.toType(), TypeInt64)
+            | ruleset(*array_infos)
             | ruleset_typeinfer_array_getitem
         ),
         verbose=True,
