@@ -122,7 +122,7 @@ def Npy_cast_f64_to_f32(val: Term) -> Term: ...
 def Npy_cast_i64_to_f32(val: Term) -> Term: ...
 @function
 def Npy_sqrt_float32(val: Term) -> Term: ...
-@function(unextractable=True)
+@function
 def Npy_tanh_float32(val: Term) -> Term: ...
 
 
@@ -320,8 +320,8 @@ class ExtendEGraphToRVSDG(ch04_1_ExtendEGraphToRVSDG):
                 return grm.write(NbOp_Pow_Float32_Int64(lhs=lhs, rhs=rhs))
             case "Npy_sqrt_float32", {"val": val}:
                 return grm.write(NpyOp_Sqrt_Float32(val))
-            # case "Npy_tanh_float32", {"val": val}:
-            #     return grm.write(NpyOp_Tanh_Float32(val))
+            case "Npy_tanh_float32", {"val": val}:
+                return grm.write(NpyOp_Tanh_Float32(val))
             # ---
             case "ModuleGetAttr", {"mod": mod, "attrname": str(attrname)}:
                 return grm.write(rg.Undef(str(op)))
@@ -396,7 +396,7 @@ class Backend(ch06_Backend):
         return module
 
 
-if True:
+if __name__ == "__main__":
     jt = compiler_pipeline(
         gelu_tanh_forward,
         argtypes=(Float32,),
