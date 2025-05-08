@@ -1,10 +1,12 @@
 name: sealir_tutorial
 channels:
   - defaults
+  - conda-forge
 dependencies:
   - python=3.12
   - llvmlite=0.44.*
-  - mlir=17.0.*
+  - mlir=19.1.*
+  - mlir-python-bindings=19.1.*
   - pytest
   - networkx
   - numpy

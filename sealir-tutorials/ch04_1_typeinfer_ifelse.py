@@ -992,6 +992,16 @@ class Attributes:
             return attr.type
         raise CompilationError("Missing return type")
 
+    def num_input_types(self):
+        return len(self._typedins)
+
+    def num_output_types(self):
+        return len(self._typedouts)
+
+    def input_types(self):
+        for idx in range(1, self.num_input_types() + 1):
+            yield self._typedins[idx].type
+
 
 # + [markdown] jp-MarkdownHeadingCollapsed=true
 # ### Extend LLVM Backend for the new operations
