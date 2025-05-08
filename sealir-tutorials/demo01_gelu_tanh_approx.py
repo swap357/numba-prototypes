@@ -9,7 +9,8 @@
 # In this demo, we show how easy it is to encode pade44 approximation for
 # `tanh()` that is used in GELU activation function:
 #
-# $$ \text{GELU}(x) \approx 0.5x \left(1 + \tanh\left(\sqrt{\frac{2}{\pi}} \left(x + 0.044715x^3\right)\right)\right) $$
+# $$ \text{GELU}(x) \approx 0.5x \left(1 + \tanh\left(\sqrt{\frac{2}{\pi}}
+# \left(x + 0.044715x^3\right)\right)\right) $$
 
 # import needed modules:
 
@@ -469,6 +470,8 @@ def pade44_tanh_expansion(x: Term):
     add = Nb_Add_Float32
     div = Nb_Div_Float32
     # Rewrite tanh(x) to the pade44 approximation
+    # Note the use of pow(), they will be optimized
+    # by the `pow_expansion` ruleset.
     yield rewrite(Npy_tanh_float32(x)).to(
         div(
             add(mul(flt(10), pow(x, liti64(3))), mul(flt(105), x)),
@@ -516,9 +519,11 @@ if __name__ == "__main__":
         backend=Backend(),
     )
 
-    # ### Compare the result
-    #
-    # Since this is an approximation (and IEEE754), the results are good at rtol=1e-6.
+# ### Compare the result
+#
+# Since this is an approximation (and IEEE754), the results are good at
+# rtol=1e-6.
 
+if __name__ == "__main__":
     relclose = lambda x, y: np.allclose(x, y, rtol=1e-6)
     run_test(gelu_tanh_forward, jt, (0.234,), equal=relclose)
