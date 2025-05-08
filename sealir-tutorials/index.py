@@ -27,6 +27,7 @@
 #   - [Part 2 - Fully typing a scalar function with loops](ch04_2_typeinfer_loops.html)
 # * [Chapter 5 - Array Type Inference with EGraphs](ch05_typeinfer_array.html)
 # * Chapter 6 - MLIR Backend for Scalar Functions
+# * [Demo 1 - GELU tanh approximation](demo01_gelu_tanh_approx.html)
 # * Chapter 7 - MLIR Backend for Array Functions
 # * Chapter 8 - MLIR Backend for Array Offload to the GPU
 # * Chapter 9 - Whole Program Compiler Driver
