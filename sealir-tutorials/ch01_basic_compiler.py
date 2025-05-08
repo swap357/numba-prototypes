@@ -279,4 +279,4 @@ if __name__ == "__main__":
         return c
 
     jt = compiler_pipeline(sum_ints, verbose=True)
-    run_test(sum_ints, jt, (12,), verbose=True, rtol=1e-6)
+    run_test(sum_ints, jt, (12,), verbose=True)
