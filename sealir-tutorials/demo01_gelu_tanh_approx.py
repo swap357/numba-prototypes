@@ -500,24 +500,25 @@ optimize_rules = pade44_tanh_expansion | pow_expansion
 
 # ### Run the optimized function
 
-jt = compiler_pipeline(
-    gelu_tanh_forward,
-    argtypes=(Float32,),
-    ruleset=(
-        base_ruleset
-        | setup_argtypes(TypeFloat32)
-        | additional_rules
-        | optimize_rules
-    ),
-    verbose=True,
-    converter_class=ExtendEGraphToRVSDG,
-    cost_model=MyCostModel(),
-    backend=Backend(),
-)
+if __name__ == "__main__":
+    jt = compiler_pipeline(
+        gelu_tanh_forward,
+        argtypes=(Float32,),
+        ruleset=(
+            base_ruleset
+            | setup_argtypes(TypeFloat32)
+            | additional_rules
+            | optimize_rules
+        ),
+        verbose=True,
+        converter_class=ExtendEGraphToRVSDG,
+        cost_model=MyCostModel(),
+        backend=Backend(),
+    )
 
-# ### Compare the result
-#
-# Since this is an approximation (and IEEE754), the results are good at rtol=1e-6.
+    # ### Compare the result
+    #
+    # Since this is an approximation (and IEEE754), the results are good at rtol=1e-6.
 
-relclose = lambda x, y: np.allclose(x, y, rtol=1e-6)
-run_test(gelu_tanh_forward, jt, (0.234,), equal=relclose)
+    relclose = lambda x, y: np.allclose(x, y, rtol=1e-6)
+    run_test(gelu_tanh_forward, jt, (0.234,), equal=relclose)
