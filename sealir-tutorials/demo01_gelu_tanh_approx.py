@@ -1,3 +1,18 @@
+# # Demo 1: Tanh Approximation for GELU activation layer
+#
+# (Depends on Ch.06)
+#
+# The deep learning community has been building domain specific compilers
+# because traditional compilers do not know the domain specific rewrites,
+# and extending these compilers is very time consuming and challenging.
+#
+# In this demo, we show how easy it is to encode pade44 approximation for
+# `tanh()` that is used in GELU activation function:
+#
+# $$ \text{GELU}(x) \approx 0.5x \left(1 + \tanh\left(\sqrt{\frac{2}{\pi}} \left(x + 0.044715x^3\right)\right)\right) $$
+
+# import needed modules:
+
 import mlir.ir as ir
 import numpy as np
 from egglog import (
@@ -14,6 +29,7 @@ from egglog import (
     subsume,
     union,
 )
+from sealir import rvsdg
 from sealir.eqsat.py_eqsat import (
     Py_AddIO,
     Py_AttrIO,
@@ -54,6 +70,26 @@ from ch05_typeinfer_array import (
 )
 from ch06_mlir_backend import Backend as ch06_Backend
 from ch06_mlir_backend import LowerStates, run_test
+
+# ## The GELU function
+
+
+def gelu_tanh_forward(a):
+    dt = np.float32
+    result = (
+        dt(0.5)
+        * a
+        * (
+            dt(1)
+            + np.tanh(np.sqrt(dt(2) / dt(np.pi)) * (a + dt(0.044715) * a**3))
+        )
+    )
+    return result
+
+
+# ## First, we define new features needed for the above function
+
+# ### Type inference for NumPy module
 
 
 class Module(Expr):
@@ -108,6 +144,9 @@ def facts_numpy_module(io: Term, name: String, op: Term, args: Vec[Term]):
     yield unary_func("tanh", Npy_tanh)
 
 
+# ### Type inference for NumPy operations
+
+
 @function
 def Npy_float32(val: Term) -> Term: ...
 @function
@@ -157,6 +196,9 @@ def ruleset_typeinfer_numpy_functions(res: Term, arg: Term):
         ).then(set_(TypeVar(res).getType()).to(TypeFloat32))
 
 
+# ### Handle `module.attr`
+
+
 @ruleset
 def ruleset_module(
     io: Term, name: String, modname: String, op: Term, obj: Term
@@ -173,6 +215,10 @@ def ruleset_module(
     )
 
 
+# # Type inference for `float32` operations
+
+
+# +
 @function
 def Nb_Add_Float32(lhs: Term, rhs: Term) -> Term: ...
 
@@ -187,6 +233,9 @@ def Nb_Div_Float32(lhs: Term, rhs: Term) -> Term: ...
 
 @function
 def Nb_Pow_Float32_Int64(lhs: Term, rhs: Term) -> Term: ...
+
+
+# -
 
 
 @ruleset
@@ -212,25 +261,12 @@ additional_rules = (
     | ruleset_typeinfer_f32_ops
 )
 
+# ### Extend the RVSDG Grammar
 
-def gelu_tanh_forward(a):
-    dt = np.float32
-    result = (
-        dt(0.5)
-        * a
-        * (
-            dt(1)
-            + np.tanh(np.sqrt(dt(2) / dt(np.pi)) * (a + dt(0.044715) * a**3))
-        )
-    )
-    return result
-
-
+# +
 TypeFloat32 = Type.simple("Float32")
 
 Float32 = NbOp_Type("Float32")
-
-from sealir import rvsdg
 
 SExpr = rvsdg.grammar.SExpr
 
@@ -275,25 +311,7 @@ class NbOp_module(NbOp_Base):
     name: str
 
 
-class MyCostModel(ch06_CostModel):
-    def get_cost_function(self, nodename, op, ty, cost, nodes, child_costs):
-        if op == "Term.DbgValue":
-            return 1e999
-
-        match op:
-            case "Npy_tanh" | "Npy_sqrt" | "Npy_float32":
-                cost = float("inf")
-            case "Npy_tanh_float32":
-                cost = 1000
-            case "Npy_sqrt_float32":
-                cost = 10
-            case "Nb_Pow_Float32_Int64":
-                cost = 1000  # FIXME caused by a bug in cost-extraction
-
-        # Fallthrough to parent's cost function
-        return super().get_cost_function(
-            nodename, op, ty, cost, nodes, child_costs
-        )
+# -
 
 
 class ExtendEGraphToRVSDG(ch04_1_ExtendEGraphToRVSDG):
@@ -333,6 +351,9 @@ class ExtendEGraphToRVSDG(ch04_1_ExtendEGraphToRVSDG):
         self, key: str, op: str, children: dict | list, grm: Grammar
     ):
         return grm.write(rg.Undef(str(key)))
+
+
+# ### Extend the backend
 
 
 class Backend(ch06_Backend):
@@ -396,6 +417,31 @@ class Backend(ch06_Backend):
         return module
 
 
+# ## Cost Model
+#
+# Assign higher cost for the Transcendental functions:
+
+
+class MyCostModel(ch06_CostModel):
+    def get_cost_function(self, nodename, op, ty, cost, nodes, child_costs):
+        match op:
+            case "Npy_tanh" | "Npy_sqrt" | "Npy_float32":
+                cost = float("inf")  # suppress untyped op
+            case "Npy_tanh_float32":
+                cost = 1000
+            case "Npy_sqrt_float32":
+                cost = 10
+            case "Nb_Pow_Float32_Int64":
+                cost = 1000  # FIXME caused by a bug in cost-extraction
+
+        # Fallthrough to parent's cost function
+        return super().get_cost_function(
+            nodename, op, ty, cost, nodes, child_costs
+        )
+
+
+# ### Run the baseline function
+
 if __name__ == "__main__":
     jt = compiler_pipeline(
         gelu_tanh_forward,
@@ -411,18 +457,18 @@ if __name__ == "__main__":
     run_test(gelu_tanh_forward, jt, (0.234,), verbose=True)
 
 
-## Add rules to optimize
+# ## Add rules to optimize
 
 
 @ruleset
 def pade44_tanh_expansion(x: Term):
-
     flt = lambda f: Npy_float32(Term.LiteralF64(float(f)))
     liti64 = Term.LiteralI64
     pow = Nb_Pow_Float32_Int64
     mul = Nb_Mul_Float32
     add = Nb_Add_Float32
     div = Nb_Div_Float32
+    # Rewrite tanh(x) to the pade44 approximation
     yield rewrite(Npy_tanh_float32(x)).to(
         div(
             add(mul(flt(10), pow(x, liti64(3))), mul(flt(105), x)),
@@ -436,24 +482,23 @@ def pade44_tanh_expansion(x: Term):
 
 @ruleset
 def pow_expansion(x: Term, ival: i64):
-    @function
-    def expand_pow(x: Term, ival: i64Like) -> Term: ...
-
-    yield rewrite(Nb_Pow_Float32_Int64(x, Term.LiteralI64(ival))).to(
-        expand_pow(x, ival)
-    )
-
-    yield rewrite(expand_pow(x, ival), subsume=True).to(
-        Nb_Mul_Float32(x, expand_pow(x, ival - 1)),
+    # Rules to expand pow(x, i) to multiplcations
+    powf = Nb_Pow_Float32_Int64
+    lit64 = Term.LiteralI64
+    mulf = Nb_Mul_Float32
+    yield rewrite(powf(x, lit64(ival))).to(
+        mulf(x, powf(x, lit64(ival - 1))),
         ival >= 1,
     )
 
-    yield rewrite(expand_pow(x, i64(0)), subsume=True).to(
+    yield rewrite(powf(x, lit64(i64(0))), subsume=True).to(
         Npy_float32(Term.LiteralF64(float(1))),
     )
 
 
 optimize_rules = pade44_tanh_expansion | pow_expansion
+
+# ### Run the optimized function
 
 jt = compiler_pipeline(
     gelu_tanh_forward,
@@ -470,5 +515,9 @@ jt = compiler_pipeline(
     backend=Backend(),
 )
 
+# ### Compare the result
+#
+# Since this is an approximation (and IEEE754), the results are good at rtol=1e-6.
+
 relclose = lambda x, y: np.allclose(x, y, rtol=1e-6)
-run_test(gelu_tanh_forward, jt, (0.234,), verbose=True, equal=relclose)
+run_test(gelu_tanh_forward, jt, (0.234,), equal=relclose)

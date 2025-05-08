@@ -37,7 +37,9 @@ from sealir.rvsdg import internal_prefix
 from ch03_egraph_program_rewrites import (
     run_test,
 )
-from ch04_1_typeinfer_ifelse import Attributes
+from ch04_1_typeinfer_ifelse import (
+    Attributes,
+)
 from ch04_1_typeinfer_ifelse import (
     ExtendEGraphToRVSDG as ConditionalExtendGraphtoRVSDG,
 )
@@ -79,7 +81,9 @@ class LowerStates(ase.TraverseState):
     function_block: func.FuncOp
     constant_block: ir.Block
 
+
 function_name = "func"
+
 
 class Backend:
     def __init__(self):
