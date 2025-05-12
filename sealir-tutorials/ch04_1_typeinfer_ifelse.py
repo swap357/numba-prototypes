@@ -946,16 +946,17 @@ class ExtendEGraphToRVSDG(EGraphToRVSDG):
 
 
 class MyCostModel(CostModel):
-    def get_cost_function(self, nodename, op, ty, cost, nodes, child_costs):
-        if op.startswith("Py_"):
+    def get_cost_function(self, nodename, op, ty, cost, children):
+        if "Term.Literal" in op:
+            # Literals has very low cost
+            return self.get_simple(1)
+        elif op.startswith("Py_"):
             # Penalize Python operations
-            # return float("inf")
-            return float(1e9999)
-
+            return self.get_simple(float("inf"))
+        elif op.startswith("Nb_"):
+            return self.get_simple(cost)
         # Fallthrough to parent's cost function
-        return super().get_cost_function(
-            nodename, op, ty, cost, nodes, child_costs
-        )
+        return super().get_cost_function(nodename, op, ty, cost, children)
 
 
 # + [markdown] jp-MarkdownHeadingCollapsed=true

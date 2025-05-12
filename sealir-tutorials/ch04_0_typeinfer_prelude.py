@@ -312,7 +312,7 @@ def codegen_extension(expr, args, builder, pyapi):
 
 
 class MyCostModel(CostModel):
-    def get_cost_function(self, nodename, op, ty, cost, nodes, child_costs):
+    def get_cost_function(self, nodename, op, ty, cost, children):
         self_cost = None
         match op:
             case "Nb_Unboxed_Add_Int64":
@@ -325,12 +325,10 @@ class MyCostModel(CostModel):
                 self_cost = 0.1
 
         if self_cost is not None:
-            return self_cost + sum(child_costs)
+            return self.get_simple(self_cost)
 
         # Fallthrough to parent's cost function
-        return super().get_cost_function(
-            nodename, op, ty, cost, nodes, child_costs
-        )
+        return super().get_cost_function(nodename, op, ty, cost, children)
 
 
 # The new ruleset with the type inference logic and facts about the compiled

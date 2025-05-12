@@ -16,7 +16,10 @@ def check(fn, ruleset):
     egraph.run(ruleset.saturate())
 
     cost, extracted = egraph_extraction(
-        egraph, rvsdg_expr, converter_class=ExtendEGraphToRVSDG
+        egraph,
+        rvsdg_expr,
+        converter_class=ExtendEGraphToRVSDG,
+        cost_model=MyCostModel(),
     )
     return extracted
 

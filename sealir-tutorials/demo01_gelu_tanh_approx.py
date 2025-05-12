@@ -424,21 +424,19 @@ class Backend(ch06_Backend):
 
 
 class MyCostModel(ch06_CostModel):
-    def get_cost_function(self, nodename, op, ty, cost, nodes, child_costs):
+    def get_cost_function(self, nodename, op, ty, cost, children):
         match op:
             case "Npy_tanh" | "Npy_sqrt" | "Npy_float32":
                 cost = float("inf")  # suppress untyped op
             case "Npy_tanh_float32":
-                cost = 1000
+                cost = 100
             case "Npy_sqrt_float32":
-                cost = 10
+                cost = 50
             case "Nb_Pow_Float32_Int64":
-                cost = 1000  # FIXME caused by a bug in cost-extraction
+                cost = 50
 
         # Fallthrough to parent's cost function
-        return super().get_cost_function(
-            nodename, op, ty, cost, nodes, child_costs
-        )
+        return super().get_cost_function(nodename, op, ty, cost, children)
 
 
 # ### Run the baseline function
