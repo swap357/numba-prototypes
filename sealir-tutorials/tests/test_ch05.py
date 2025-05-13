@@ -9,7 +9,8 @@ def test_ch5_example_1():
         argtypes=(array_1d_symbolic, Int64),
         ruleset=(
             base_ruleset
-            | facts_function_types
+            | setup_argtypes(array_int64_1d.toType(), TypeInt64)
+            | ruleset(*array_infos)
             | ruleset_typeinfer_array_getitem
         ),
         verbose=False,
@@ -33,7 +34,8 @@ def test_ch5_example_2():
         argtypes=(array_1d_symbolic, Int64),
         ruleset=(
             base_ruleset
-            | facts_function_types
+            | setup_argtypes(array_int64_1d.toType(), TypeInt64)
+            | ruleset(*array_infos)
             | ruleset_typeinfer_array_getitem
         ),
         verbose=False,

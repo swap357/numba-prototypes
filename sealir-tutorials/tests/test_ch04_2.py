@@ -7,7 +7,7 @@ def test_ch04_2_example_1():
     jt = compiler_pipeline(
         example_1,
         argtypes=(Int64, Int64),
-        ruleset=base_ruleset,
+        ruleset=base_ruleset | setup_argtypes(TypeInt64, TypeInt64),
         verbose=False,
         converter_class=ExtendEGraphToRVSDG,
         cost_model=MyCostModel(),
@@ -20,7 +20,7 @@ def test_ch04_2_example_2():
     jt = compiler_pipeline(
         example_2,
         argtypes=(Int64, Int64),
-        ruleset=base_ruleset,
+        ruleset=base_ruleset | setup_argtypes(TypeInt64, TypeInt64),
         verbose=False,
         converter_class=ExtendEGraphToRVSDG,
         cost_model=MyCostModel(),

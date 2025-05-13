@@ -37,7 +37,9 @@ from sealir.rvsdg import internal_prefix
 from ch03_egraph_program_rewrites import (
     run_test,
 )
-from ch04_1_typeinfer_ifelse import Attributes
+from ch04_1_typeinfer_ifelse import (
+    Attributes,
+)
 from ch04_1_typeinfer_ifelse import (
     ExtendEGraphToRVSDG as ConditionalExtendGraphtoRVSDG,
 )
@@ -54,17 +56,20 @@ from ch04_1_typeinfer_ifelse import (
     NbOp_Sub_Int64,
     NbOp_Type,
     SExpr,
+    TypeInt64,
 )
 from ch04_1_typeinfer_ifelse import base_ruleset as if_else_ruleset
 from ch04_1_typeinfer_ifelse import (
     compiler_pipeline,
-    facts_function_types,
     ruleset_type_infer_float,
+    setup_argtypes,
 )
 from ch04_2_typeinfer_loops import (
     ExtendEGraphToRVSDG as LoopExtendEGraphToRVSDG,
 )
-from ch04_2_typeinfer_loops import NbOp_Not_Int64
+from ch04_2_typeinfer_loops import (
+    NbOp_Not_Int64,
+)
 from ch04_2_typeinfer_loops import base_ruleset as loop_ruleset
 from utils import IN_NOTEBOOK
 
@@ -76,9 +81,24 @@ class LowerStates(ase.TraverseState):
     function_block: func.FuncOp
     constant_block: ir.Block
 
+
 function_name = "func"
 
+
 class Backend:
+    def __init__(self):
+        self.context = context = ir.Context()
+        self.f64 = ir.F64Type.get(context=context)
+        self.i32 = ir.IntegerType.get_signless(32, context=context)
+        self.i64 = ir.IntegerType.get_signless(64, context=context)
+        self.boo = ir.IntegerType.get_signless(1, context=context)
+
+    def lower_type(self, ty: NbOp_Type):
+        match ty:
+            case NbOp_Type("Int64"):
+                return ir.IntType(64)
+        raise NotImplementedError(f"unknown type: {ty}")
+
     def get_mlir_type(self, seal_ty):
         match seal_ty.name:
             case "Int64":
@@ -87,14 +107,9 @@ class Backend:
                 return self.f64
 
     def lower(self, root: rg.Func, argtypes):
-        self.context = context = ir.Context()
+        context = self.context
         self.loc = loc = ir.Location.unknown(context=context)
         self.module = module = ir.Module.create(loc=loc)
-
-        self.f64 = ir.F64Type.get(context=context)
-        self.i32 = ir.IntegerType.get_signless(32, context=context)
-        self.i64 = ir.IntegerType.get_signless(64, context=context)
-        self.boo = ir.IntegerType.get_signless(1, context=context)
 
         # Get the module body pointer so we can insert content into the
         # module.
@@ -108,7 +123,7 @@ class Backend:
         )
 
         with context, loc, module_body:
-            # Constuct a function that emits a callable C-interface.  
+            # Constuct a function that emits a callable C-interface.
             fun = func.FuncOp(function_name, (input_types, output_types))
             fun.attributes["llvm.emit_c_interface"] = ir.UnitAttr.get()
 
@@ -157,8 +172,9 @@ class Backend:
             cf.br([], fun.body.blocks[1])
 
         module.dump()
+        return self.run_passes(module, context)
 
-        # MLIR internal passmanager
+    def run_passes(self, module, context):
         pass_man = passmanager.PassManager(context=context)
         pass_man.add("convert-scf-to-cf")
         pass_man.add("convert-func-to-llvm")
@@ -166,7 +182,6 @@ class Backend:
         pass_man.run(module.operation)
         # Output LLVM-dialect MLIR
         module.dump()
-
         return module
 
     def lower_expr(self, expr: SExpr, state: LowerStates):
@@ -453,7 +468,7 @@ if __name__ == "__main__":
     jt = compiler_pipeline(
         example_1,
         argtypes=(Int64, Int64),
-        ruleset=(if_else_ruleset | facts_function_types),
+        ruleset=(if_else_ruleset | setup_argtypes(TypeInt64, TypeInt64)),
         verbose=True,
         converter_class=ConditionalExtendGraphtoRVSDG,
         cost_model=MyCostModel(),
@@ -485,7 +500,7 @@ if __name__ == "__main__":
         argtypes=(Int64, Int64),
         ruleset=(
             if_else_ruleset
-            | facts_function_types
+            | setup_argtypes(TypeInt64, TypeInt64)
             | ruleset_type_infer_float  # < --- added for float()
         ),
         verbose=True,
@@ -514,7 +529,7 @@ if __name__ == "__main__":
     jt = compiler_pipeline(
         example_3,
         argtypes=(Int64, Int64),
-        ruleset=loop_ruleset,
+        ruleset=loop_ruleset | setup_argtypes(TypeInt64, TypeInt64),
         verbose=True,
         converter_class=LoopExtendEGraphToRVSDG,
         cost_model=MyCostModel(),
@@ -542,7 +557,7 @@ if __name__ == "__main__":
     jt = compiler_pipeline(
         example_4,
         argtypes=(Int64, Int64),
-        ruleset=loop_ruleset,
+        ruleset=loop_ruleset | setup_argtypes(TypeInt64, TypeInt64),
         verbose=True,
         converter_class=LoopExtendEGraphToRVSDG,
         cost_model=MyCostModel(),
