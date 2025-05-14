@@ -5,6 +5,29 @@ import sys
 
 from dataclasses import dataclass
 
+def attribute_to_qualified_name(node):
+    """
+    Converts an ast.Attribute node into a fully qualified name string.
+
+    For example, if the AST represents "module.submodule.function",
+    this function will return the string "module.submodule.function".
+
+    Args:
+        node: An ast.Attribute node or ast.Name node
+
+    Returns:
+        str: The fully qualified name as a string
+    """
+    if isinstance(node, ast.Name):
+        return node.id
+    elif isinstance(node, ast.Attribute):
+        return f"{attribute_to_qualified_name(node.value)}.{node.attr}"
+    elif isinstance(node, ast.Call):
+        return attribute_to_qualified_name(node.func)
+    else:
+        raise TypeError(f"Expected ast.Attribute or ast.Name, got {type(node).__name__}")
+
+
 @dataclass
 class SymbolInfo:
     name: str
