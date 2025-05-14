@@ -41,6 +41,8 @@ class NamespaceVisitor(ast.NodeVisitor):
         self.file_name = file_name
         self.tree = ast.parse(source_code)
         self.symt = symtable.symtable(source_code, file_name , "exec")
+        self.classes = [node.name for node in ast.walk(self.tree) if
+                        isinstance(node, ast.ClassDef)]
         self.namespace_stack = []
         self.class_stack = []
         self.functions = {}
@@ -54,7 +56,7 @@ class NamespaceVisitor(ast.NodeVisitor):
             # If the call starts with "self", it is a method call, we replace
             # the "self" with the current class name to qualify it.
             call_qname = self.class_stack[-1] + call_qname[4:]
-        if self.class_stack and call_qname.endswith(self.class_stack[-1]):
+        if self.class_stack and call_qname in self.classes:
             # If the call ends with the current class name, we replace it with
             # the constructor call, since this is the Python semantics.
             call_qname = call_qname + ".__init__"
