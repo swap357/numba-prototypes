@@ -64,9 +64,9 @@ class NamespaceVisitor(ast.NodeVisitor):
         if self.namespace_stack:
             name = ".".join(self.namespace_stack)
             assert name in self.functions, f"Function {name} not found"
-            self.functions[name].calls.append(call_qname)
+            self.functions[name].calls.append((node, call_qname))
         else:
-            self.global_calls.append(call_qname)
+            self.global_calls.append((node, call_qname))
 
     def visit_all(self):
         """Visit all nodes in the AST."""
