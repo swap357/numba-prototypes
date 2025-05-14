@@ -56,7 +56,7 @@ class NamespaceVisitor(ast.NodeVisitor):
             # If the call starts with "self", it is a method call, we replace
             # the "self" with the current class name to qualify it.
             call_qname = self.class_stack[-1] + call_qname[4:]
-        if self.class_stack and call_qname in self.classes:
+        if call_qname in self.classes:
             # If the call ends with the current class name, we replace it with
             # the constructor call, since this is the Python semantics.
             call_qname = call_qname + ".__init__"
@@ -133,6 +133,7 @@ def main():
     nv = NamespaceVisitor(source_code, source_file)
     nv.visit_all()
     pprint.pp(nv.functions)
+    pprint.pp(nv.global_calls)
 
     #compiler = CompilerDriver()
     #symbol_table = compiler.compile(source_code)
