@@ -42,17 +42,29 @@ class NamespaceVisitor(ast.NodeVisitor):
         self.tree = ast.parse(source_code)
         self.symt = symtable.symtable(source_code, file_name , "exec")
         self.namespace_stack = []
+        self.class_stack = []
         self.functions = {}
         self.global_calls = []
 
     def update_calls(self, node):
         """Update the calls for a function or register a global call."""
+        # Flatten the name of the call from ast.Attribute or ast.Name
+        call_qname = attribute_to_qualified_name(node)
+        if call_qname.startswith("self"):
+            # If the call starts with "self", it is a method call, we replace
+            # the "self" with the current class name to qualify it.
+            call_qname = self.class_stack[-1] + call_qname[4:]
+        if self.class_stack and call_qname.endswith(self.class_stack[-1]):
+            # If the call ends with the current class name, we replace it with
+            # the constructor call, since this is the Python semantics.
+            call_qname = call_qname + ".__init__"
+
         if self.namespace_stack:
             name = ".".join(self.namespace_stack)
             assert name in self.functions, f"Function {name} not found"
-            self.functions[name].calls.append(node)
+            self.functions[name].calls.append(call_qname)
         else:
-            self.global_calls.append(node)
+            self.global_calls.append(call_qname)
 
     def visit_all(self):
         """Visit all nodes in the AST."""
@@ -75,12 +87,16 @@ class NamespaceVisitor(ast.NodeVisitor):
         """Visit a class definition."""
         # Create a new namespace for the class
         self.namespace_stack.append(node.name)
+        # Push the name of the class onto the class_stack
+        self.class_stack.append(node.name)
 
         # Visit the class body
         self.generic_visit(node)
 
         # Pop the namespace after visiting the class
         self.namespace_stack.pop()
+        # Pop the class name from the class_stack
+        self.class_stack.pop()
 
     def visit_Call(self, node):
         """Visit a function call."""
