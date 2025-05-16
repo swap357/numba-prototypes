@@ -161,4 +161,4 @@ def main():
     #        print(f"  {symbol}: {info}")
     #
 if __name__ == "__main__":
-    main()
+    cgv = main()
