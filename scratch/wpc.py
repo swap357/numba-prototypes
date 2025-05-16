@@ -34,19 +34,35 @@ class SymbolInfo:
     ast: ast.AST
     calls: list
 
-class NamespaceVisitor(ast.NodeVisitor):
+class CallGraphVisitor(ast.NodeVisitor):
 
     def __init__(self, source_code, file_name):
+        # Stash the arguments
         self.source_code = source_code
         self.file_name = file_name
+        # Get the AST once
         self.tree = ast.parse(source_code)
+        # Initialize the cpython symtable
         self.symt = symtable.symtable(source_code, file_name , "exec")
-        self.classes = [node.name for node in ast.walk(self.tree) if
-                        isinstance(node, ast.ClassDef)]
+        # Filter out all class definitions from the AST
+        self.classes = set((node.name for node in ast.walk(self.tree) if
+                        isinstance(node, ast.ClassDef)))
+        # Setup the namespace and class stacks
         self.namespace_stack = []
         self.class_stack = []
+        # Dictionary to record all functions
         self.functions = {}
+        # List of all global ast.Call nodes
         self.global_calls = []
+
+    def get_call_graph(self) -> dict[str: tuple[str]]:
+        """Obtain a call graph suitable for processing with networkx.
+
+        Returns a dictionary mapping function names as strings to lists of
+        function names as strings.
+        """
+
+        return {k:tuple(c[1] for c in v.calls) for k,v in nv.functions.items()}
 
     def update_calls(self, node):
         """Update the calls for a function or register a global call."""
@@ -130,10 +146,11 @@ def main():
         sys.exit(1)
 
     # Create a NamespaceVisitor instance
-    nv = NamespaceVisitor(source_code, source_file)
-    nv.visit_all()
-    pprint.pp(nv.functions)
-    pprint.pp(nv.global_calls)
+    cgv = CallGraphVisitor(source_code, source_file)
+    cgv .visit_all()
+    pprint.pp(cgv.functions)
+    pprint.pp(cgv.global_calls)
+    return cgv
 
     #compiler = CompilerDriver()
     #symbol_table = compiler.compile(source_code)
