@@ -27,7 +27,10 @@ import mlir.dialects.arith as arith
 import mlir.dialects.cf as cf
 import mlir.dialects.func as func
 import mlir.dialects.scf as scf
+import mlir.runtime as runtime
 import mlir.execution_engine as execution_engine
+import mlir.runtime as runtime
+
 import mlir.ir as ir
 import mlir.passmanager as passmanager
 from sealir import ase
@@ -96,15 +99,10 @@ class Backend:
     def lower_type(self, ty: NbOp_Type):
         match ty:
             case NbOp_Type("Int64"):
-                return ir.IntType(64)
-        raise NotImplementedError(f"unknown type: {ty}")
-
-    def get_mlir_type(self, seal_ty):
-        match seal_ty.name:
-            case "Int64":
                 return self.i64
-            case "Float64":
+            case NbOp_Type("Float64"):
                 return self.f64
+        raise NotImplementedError(f"unknown type: {ty}")
 
     def lower(self, root: rg.Func, argtypes):
         context = self.context
@@ -113,11 +111,11 @@ class Backend:
 
         # Get the module body pointer so we can insert content into the
         # module.
-        module_body = ir.InsertionPoint(module.body)
+        self.module_body = module_body =  ir.InsertionPoint(module.body)
         # Convert SealIR types to MLIR types.
-        input_types = tuple([self.get_mlir_type(x) for x in argtypes])
+        input_types = tuple([self.lower_type(x) for x in argtypes])
         output_types = (
-            self.get_mlir_type(
+            self.lower_type(
                 Attributes(root.body.begin.attrs).get_return_type(root.body)
             ),
         )
@@ -176,8 +174,14 @@ class Backend:
 
     def run_passes(self, module, context):
         pass_man = passmanager.PassManager(context=context)
+        
+        pass_man.add("convert-linalg-to-loops")
         pass_man.add("convert-scf-to-cf")
+        pass_man.add("finalize-memref-to-llvm")
         pass_man.add("convert-func-to-llvm")
+        pass_man.add("convert-index-to-llvm")
+        pass_man.add("reconcile-unrealized-casts")
+
         pass_man.enable_verifier(True)
         pass_man.run(module.operation)
         # Output LLVM-dialect MLIR
@@ -384,12 +388,14 @@ class Backend:
     def jit_compile(self, llmod, func_node: rg.Func):
         attributes = Attributes(func_node.body.begin.attrs)
         # Convert SealIR types into MLIR types
-        input_types = tuple(
-            [self.get_mlir_type(x) for x in attributes.input_types()]
-        )
+        with self.loc:
+            input_types = tuple(
+                # [self.lower_type(x) for x in attributes.input_types()]
+                [ir.MemRefType.get([10, 10], self.f64)]*2
+            )
 
         output_types = (
-            self.get_mlir_type(
+            self.lower_type(
                 Attributes(func_node.body.begin.attrs).get_return_type(
                     func_node.body
                 )
@@ -406,6 +412,8 @@ def get_exec_ptr(mlir_ty, val):
         return ctypes.pointer(ctypes.c_float(val))
     elif isinstance(mlir_ty, ir.F64Type):
         return ctypes.pointer(ctypes.c_double(val))
+    elif isinstance(mlir_ty, ir.MemRefType):
+        return ctypes.pointer(ctypes.pointer(runtime.get_ranked_memref_descriptor(val)))
 
 
 @dataclass(frozen=True)
