@@ -36,6 +36,7 @@ import mlir.passmanager as passmanager
 from sealir import ase
 from sealir.rvsdg import grammar as rg
 from sealir.rvsdg import internal_prefix
+import numpy as np
 
 from ch03_egraph_program_rewrites import (
     run_test,
@@ -115,9 +116,10 @@ class Backend:
         # Convert SealIR types to MLIR types.
         input_types = tuple([self.lower_type(x) for x in argtypes])
         output_types = (
-            self.lower_type(
-                Attributes(root.body.begin.attrs).get_return_type(root.body)
-            ),
+            ir.MemRefType.get([10, 10], self.f64, loc=self.loc),
+            # self.lower_type(
+            #     Attributes(root.body.begin.attrs).get_return_type(root.body)
+            # ),
         )
 
         with context, loc, module_body:
@@ -391,15 +393,16 @@ class Backend:
         with self.loc:
             input_types = tuple(
                 # [self.lower_type(x) for x in attributes.input_types()]
-                [ir.MemRefType.get([10, 10], self.f64)]*2
+                [ir.MemRefType.get([10, 10], self.f64)]
             )
 
         output_types = (
-            self.lower_type(
-                Attributes(func_node.body.begin.attrs).get_return_type(
-                    func_node.body
-                )
-            ),
+            [ir.MemRefType.get([10, 10], self.f64, loc=self.loc)]
+            # self.lower_type(
+            #     Attributes(func_node.body.begin.attrs).get_return_type(
+            #         func_node.body
+            #     )
+            # ),
         )
         # Converts the MLIR module into a JIT-callable function.
         return JitCallable.from_pointer(llmod, input_types, output_types)
@@ -428,7 +431,8 @@ class JitCallable:
         assert (
             len(output_types) == 1
         ), "Execution of functions with output arguments > 1 not supported"
-        res_ptr = get_exec_ptr(output_types[0], 0)
+        res_val = np.zeros((10,10), dtype=np.float64)
+        res_ptr = get_exec_ptr(output_types[0], res_val)
 
         # Build a wrapper function
         def jit_func(*input_args):
@@ -451,7 +455,7 @@ class JitCallable:
             # appended to the end of all input pointers in the invoke call.
             engine.invoke(function_name, *input_exec_ptrs, res_ptr)
 
-            return res_ptr.contents.value
+            return res_val
 
         return cls(jit_func)
 

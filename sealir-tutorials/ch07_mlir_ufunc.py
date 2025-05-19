@@ -255,18 +255,18 @@ def create_binary_ufunc(operation, memref_ty, module_body, f64):
     
     return ufun
 
-def example_1(a, b):
-    b = - a
-    return 0
+def example_1(a):
+    c = - a
+    return c
 
 if __name__ == "__main__":
     # compile
     jt = compiler_pipeline(
         example_1,
-        argtypes=(array_2d_symbolic, array_2d_symbolic),
+        argtypes=(array_2d_symbolic,),
         ruleset=(
             base_ruleset
-            | setup_argtypes(array_float64_2d.toType(), array_float64_2d.toType())
+            | setup_argtypes(array_float64_2d.toType())
             | ruleset(*array_infos)
             | ruleset_typeinfer_array_neg
         ),
@@ -277,10 +277,9 @@ if __name__ == "__main__":
     )
     # create array
     ary = np.arange(100, dtype=np.int64).reshape(10, 10)
-    res = np.zeros(100, dtype=np.int64).reshape(10, 10)
 
-    got = jt(ary, res)
-    print("res", res)
+    got = jt(ary)
+    print("GOT", got)
 
     ary_exp = np.arange(100, dtype=np.int64).reshape(10, 10)
     res_exp = np.zeros(100, dtype=np.int64).reshape(10, 10)
