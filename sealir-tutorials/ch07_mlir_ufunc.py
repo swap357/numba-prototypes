@@ -365,9 +365,8 @@ def ufunc_vectorize(input_types, output_types, shape=None, ndim=None):
 
                 body = matmul.regions[0].blocks.append(f64, f64)
                 with ir.InsertionPoint(body):
-                    a, b = body.arguments\
-                    # TODO: Need to call original function here using callop on func
-                    m = arith.addf(a, b)
+                    a, b = body.arguments
+                    m = func.CallOp([f64], "func", [a, b])
                     linalg.YieldOp([m])
                 func.ReturnOp([])
 
@@ -412,8 +411,8 @@ def foo(a, b):
 
 if __name__ == "__main__":
     # create array
-    ary = np.arange(100, dtype=np.int64).reshape(10, 10)
-    ary_2 = np.arange(100, dtype=np.int64).reshape(10, 10)
+    ary = np.arange(100, dtype=np.float64).reshape(10, 10)
+    ary_2 = np.arange(100, dtype=np.float64).reshape(10, 10)
 
     got = foo(ary, ary_2)
     print("Got", got)

@@ -105,7 +105,7 @@ class Backend:
                 return self.f64
         raise NotImplementedError(f"unknown type: {ty}")
 
-    def lower(self, root: rg.Func, argtypes):
+    def lower(self, root: rg.Func, argtypes, ignore_passes=False):
         context = self.context
         self.loc = loc = ir.Location.unknown(context=context)
         self.module = module = ir.Module.create(loc=loc)
@@ -171,7 +171,10 @@ class Backend:
             cf.br([], fun.body.blocks[1])
 
         module.dump()
-        return self.run_passes(module, context)
+        if ignore_passes:
+            return module
+        else:
+            return self.run_passes(module, context)
 
     def run_passes(self, module, context):
         pass_man = passmanager.PassManager(context=context)

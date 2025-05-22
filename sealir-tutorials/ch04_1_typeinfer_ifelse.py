@@ -551,7 +551,7 @@ def compiler_pipeline(
     print("cost =", cost)
     print(format_rvsdg(extracted))
 
-    llmod = backend.lower(extracted, argtypes)
+    llmod = backend.lower(extracted, argtypes, ignore_passes=return_module)
     if verbose:
         print("LLVM module".center(80, "="))
         print(llmod)
@@ -1074,7 +1074,7 @@ class Backend:
                     f"unsupported lower_cast: {fromty} -> {toty}"
                 )
 
-    def lower(self, root: rg.Func, argtypes):
+    def lower(self, root: rg.Func, argtypes, ignore_passes=False):
         mod = ir.Module()
         llargtypes = [*map(self.lower_type, argtypes)]
 
