@@ -383,7 +383,17 @@ def ufunc_vectorize(input_types, output_types, shape=None, ndim=None):
         engine = execution_engine.ExecutionEngine(llmod)
 
         def inner_wrapper(*args):
+            nonlocal shape
+            nonlocal ndim
             assert len(args) == num_inputs, "Number of provided arguments doesn't match definition"
+            if shape is not None:
+                for arg in args:
+                    assert arg.shape == shape, "Provided shape doesn't match ufunc definition"
+            elif ndim is not None:
+                shape = args[0].shape
+                for arg in args:
+                    assert arg.ndim == ndim, "Provided ndim doesn't match ufunc definition"
+                    assert arg.shape == shape, "Provided arguments have different shapes than each other, this is currently not supported"
             # TODO: Check args properly with input shape and declare resulting array accordingly
             res_array = np.zeros_like(args[0])
             engine_args = [ctypes.pointer(ctypes.pointer(runtime.get_ranked_memref_descriptor(arg))) for arg in (*args, res_array)]
@@ -395,7 +405,7 @@ def ufunc_vectorize(input_types, output_types, shape=None, ndim=None):
     return wrapper
 
 
-@ufunc_vectorize(input_types=[Float64, Float64, Float64], output_types=[Float64], shape=(10, 10))
+@ufunc_vectorize(input_types=[Float64, Float64, Float64], output_types=[Float64], ndim=2)
 def foo(a, b, c):
     x = a + 1.0
     y = b - 2.0
