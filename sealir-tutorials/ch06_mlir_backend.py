@@ -116,10 +116,9 @@ class Backend:
         # Convert SealIR types to MLIR types.
         input_types = tuple([self.lower_type(x) for x in argtypes])
         output_types = (
-            ir.MemRefType.get([10, 10], self.f64, loc=self.loc),
-            # self.lower_type(
-            #     Attributes(root.body.begin.attrs).get_return_type(root.body)
-            # ),
+            self.lower_type(
+                Attributes(root.body.begin.attrs).get_return_type(root.body)
+            ),
         )
 
         with context, loc, module_body:
@@ -392,17 +391,15 @@ class Backend:
         # Convert SealIR types into MLIR types
         with self.loc:
             input_types = tuple(
-                # [self.lower_type(x) for x in attributes.input_types()]
-                [ir.MemRefType.get([10, 10], self.f64)]
+                [self.lower_type(x) for x in attributes.input_types()]
             )
 
         output_types = (
-            [ir.MemRefType.get([10, 10], self.f64, loc=self.loc)]
-            # self.lower_type(
-            #     Attributes(func_node.body.begin.attrs).get_return_type(
-            #         func_node.body
-            #     )
-            # ),
+            self.lower_type(
+                Attributes(func_node.body.begin.attrs).get_return_type(
+                    func_node.body
+                )
+            ),
         )
         # Converts the MLIR module into a JIT-callable function.
         return JitCallable.from_pointer(llmod, input_types, output_types)
@@ -431,8 +428,7 @@ class JitCallable:
         assert (
             len(output_types) == 1
         ), "Execution of functions with output arguments > 1 not supported"
-        res_val = np.zeros((10,10), dtype=np.float64)
-        res_ptr = get_exec_ptr(output_types[0], res_val)
+        res_ptr = get_exec_ptr(output_types[0], 0)
 
         # Build a wrapper function
         def jit_func(*input_args):

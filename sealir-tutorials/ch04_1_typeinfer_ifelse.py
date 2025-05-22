@@ -496,6 +496,7 @@ def compiler_pipeline(
     converter_class=EGraphToRVSDG,
     cost_model=None,
     backend,
+    return_module = False,
 ):
 
     rvsdg_expr, dbginfo = frontend(fn)
@@ -554,6 +555,8 @@ def compiler_pipeline(
     if verbose:
         print("LLVM module".center(80, "="))
         print(llmod)
+    if return_module:
+        return llmod
     return backend.jit_compile(llmod, extracted)
 
 
