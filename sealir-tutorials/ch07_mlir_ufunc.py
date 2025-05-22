@@ -288,6 +288,7 @@ class Backend(_Backend):
 Float64 = NbOp_Type("Float64")
 
 def ufunc_vectorize(input_types, output_types, shape=None, ndim=None):
+    num_inputs = len(input_types)
 
     def to_input_dtypes(input_tys):
         res = []
@@ -297,7 +298,7 @@ def ufunc_vectorize(input_types, output_types, shape=None, ndim=None):
         return tuple(res)
 
     def wrapper(inner_func):
-        # compile
+        nonlocal ndim
         llmod = compiler_pipeline(
             inner_func,
             argtypes=input_types,
@@ -319,54 +320,44 @@ def ufunc_vectorize(input_types, output_types, shape=None, ndim=None):
         index_type = ir.IndexType.get(context=context)
 
         with context, loc:
-            # TODO: Wire shapes into this
-            memref_ty_undef = ir.MemRefType.get([ir.ShapedType.get_dynamic_size(), ir.ShapedType.get_dynamic_size()], f64)
-            memref_ty_1 = ir.MemRefType.get([10, 10], f64)
-            memref_ty_2 = ir.MemRefType.get([10, 20], f64)
+            if ndim is not None:
+                memref_ty = ir.MemRefType.get([ir.ShapedType.get_dynamic_size()] * ndim, f64)
+            elif shape is not None:
+                ndim = len(shape)
+                memref_ty = ir.MemRefType.get(shape, f64)
 
-        input_typ_outer = (memref_ty_undef, memref_ty_undef, memref_ty_undef)
-        output_typ_outer = ()
+        input_typ_outer = (memref_ty,) * (num_inputs + 1)
         with context, loc, module_body:
-            fun = func.FuncOp("ufunc", (input_typ_outer, output_typ_outer))
+            fun = func.FuncOp("ufunc", (input_typ_outer, ()))
             fun.attributes["llvm.emit_c_interface"] = ir.UnitAttr.get()
             const_block = fun.add_entry_block()
             constant_entry = ir.InsertionPoint(const_block)
             
             with constant_entry:
-                array_1, array_2, res = fun.arguments
+                arys = fun.arguments[:-1]
+                res = fun.arguments[-1]
 
-                # TODO: Need proper dimensional wiring
+                # TODO: Need proper dimensional wiring according to ndim
                 indexing_maps = ir.ArrayAttr.get([
-                    ir.AffineMapAttr.get(ir.AffineMap.get(2, 0, [
-                        ir.AffineExpr.get_dim(0),
-                        ir.AffineExpr.get_dim(1),
+                    ir.AffineMapAttr.get(ir.AffineMap.get(ndim, 0, [
+                        ir.AffineExpr.get_dim(i) for i in range(ndim)
                     ])),
-                    ir.AffineMapAttr.get(ir.AffineMap.get(2, 0, [
-                        ir.AffineExpr.get_dim(0),
-                        ir.AffineExpr.get_dim(1),
-                    ])),
-                    ir.AffineMapAttr.get(ir.AffineMap.get(2, 0, [
-                        ir.AffineExpr.get_dim(0),
-                        ir.AffineExpr.get_dim(1),
-                    ])),
-                ])
+                ] * (num_inputs + 1))
                 iterators = ir.ArrayAttr.get([
-                    ir.Attribute.parse(f"#linalg.iterator_type<parallel>"),
-                    ir.Attribute.parse(f"#linalg.iterator_type<parallel>"),
-                    ir.Attribute.parse(f"#linalg.iterator_type<parallel>"),
-                ])
+                    ir.Attribute.parse(f"#linalg.iterator_type<parallel>")
+                ] * (num_inputs + 1))
                 matmul = linalg.GenericOp(
                     result_tensors=[],
-                    inputs=[array_1, array_2],
+                    inputs=arys,
                     outputs=[res],
                     indexing_maps=indexing_maps,
                     iterator_types=iterators
                 )
 
-                body = matmul.regions[0].blocks.append(f64, f64)
+                body = matmul.regions[0].blocks.append(*([f64] * num_inputs))
                 with ir.InsertionPoint(body):
-                    a, b = body.arguments
-                    m = func.CallOp([f64], "func", [a, b])
+                    # TODO: Type conversion for different types
+                    m = func.CallOp([f64], "func", [*body.arguments])
                     linalg.YieldOp([m])
                 func.ReturnOp([])
 
@@ -392,6 +383,7 @@ def ufunc_vectorize(input_types, output_types, shape=None, ndim=None):
         engine = execution_engine.ExecutionEngine(llmod)
 
         def inner_wrapper(*args):
+            assert len(args) == num_inputs, "Number of provided arguments doesn't match definition"
             # TODO: Check args properly with input shape and declare resulting array accordingly
             res_array = np.zeros_like(args[0])
             engine_args = [ctypes.pointer(ctypes.pointer(runtime.get_ranked_memref_descriptor(arg))) for arg in (*args, res_array)]
@@ -403,17 +395,19 @@ def ufunc_vectorize(input_types, output_types, shape=None, ndim=None):
     return wrapper
 
 
-@ufunc_vectorize(input_types=[Float64, Float64], output_types=[Float64], shape=(10, 10))
-def foo(a, b):
+@ufunc_vectorize(input_types=[Float64, Float64, Float64], output_types=[Float64], shape=(10, 10))
+def foo(a, b, c):
     x = a + 1.0
     y = b - 2.0
-    return x + y
+    z = c + 3.0
+    return x + y + z
 
 if __name__ == "__main__":
     # create array
     ary = np.arange(100, dtype=np.float64).reshape(10, 10)
     ary_2 = np.arange(100, dtype=np.float64).reshape(10, 10)
+    ary_3 = np.arange(100, dtype=np.float64).reshape(10, 10)
 
-    got = foo(ary, ary_2)
+    got = foo(ary, ary_2, ary_3)
     print("Got", got)
 
