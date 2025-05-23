@@ -233,6 +233,18 @@ def attribute_to_qualified_name(node):
     else:
         raise TypeError(f"Expected ast.Attribute or ast.Name, got {type(node).__name__}")
 
+def to_graphviz(cgv):
+    # Convert the call graph in a CallGraphVisitor to a graphviz style graph
+    # that Jupyter can render natively.
+    #
+
+    import networkx as nx
+    from graphviz import Source
+    # We use the intrafce "adjacency list" to create a networkx DiGraph (directed graph).
+    # Then convert that to a graphviz style graph for visualization using various APIs.
+    return Source(nx.nx_agraph.to_agraph(nx.DiGraph(cgv.get_call_graph())).string())
+
+
 # ### Main entry point, the command line interface.
 
 def main(args):
