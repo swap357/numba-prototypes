@@ -302,3 +302,19 @@ if __name__ == "__main__":
         # Generalized command line entry.
         cgv = main(sys.argv)
 
+
+# ## Rendering the Call Graph with external tools.
+#
+# In this section of this tutorial chapter, we will use the package `networkx` to visualize the call graph.
+#
+# As you can see, there are two separate Call Graphs dervied from the top level calls in `llm.py`:
+#
+# * `TransformerLayer.__init__`
+# * `TransformerLayer.forward`
+#
+# This information can then be used to compile
+
+# TODO how to exclude this from jupyter execution.
+to_graphviz(cgv)
+
+
