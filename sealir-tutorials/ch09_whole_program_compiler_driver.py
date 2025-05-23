@@ -316,7 +316,10 @@ if __name__ == "__main__":
 # * `TransformerLayer.__init__`
 # * `TransformerLayer.forward`
 #
-# This information can then be used to compile
+# This information can then be used to compile the program. In this case
+# however this is not yet sufficient, as you can see from the call graph there
+# are calls to Numpy, a library who's source is outside of the module. Thus we
+# must assume that these will be resolved at a later stage.
 
 # TODO how to exclude this from jupyter execution.
 to_graphviz(cgv)
