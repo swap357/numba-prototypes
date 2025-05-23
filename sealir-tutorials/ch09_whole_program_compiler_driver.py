@@ -284,7 +284,7 @@ def main(args):
 # interface or the example run in the jupyter notebook.
 #
 # The example shows the usage of the CallGraphVisitor class on the file
-# `llm.py` which is a simplified inference engine for a large language model.
+# [`llm.py`](./llm.py) which is a simplified inference engine for a large language model.
 #
 # As you can see we print out the symbol table and the global calls.
 
