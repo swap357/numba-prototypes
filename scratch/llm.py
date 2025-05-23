@@ -73,6 +73,10 @@ class FeedForwardNetwork:
         return np.matmul(np.maximum(np.matmul(x, self.W1), 0), self.W2)
 
 class TransformerLayer:
+
+    self_attn: MultiHeadAttention
+    feed_forward: FeedForwardNetwork
+
     def __init__(self, num_heads=8, embedding_dim=128, dropout=0.1):
         self.self_attn = MultiHeadAttention(num_heads, embedding_dim)
         self.feed_forward = FeedForwardNetwork(embedding_dim)

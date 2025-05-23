@@ -3,7 +3,9 @@ import pprint
 import symtable
 import sys
 
+from collections import defaultdict
 from dataclasses import dataclass
+
 
 def attribute_to_qualified_name(node):
     """
@@ -50,6 +52,8 @@ class CallGraphVisitor(ast.NodeVisitor):
         # Setup the namespace and class stacks
         self.namespace_stack = []
         self.class_stack = []
+        # Nested dictionary to record class types
+        self.class_types = defaultdict(dict)
         # Dictionary to record all functions
         self.functions = {}
         # List of all global ast.Call nodes
@@ -68,10 +72,23 @@ class CallGraphVisitor(ast.NodeVisitor):
         """Update the calls for a function or register a global call."""
         # Flatten the name of the call from ast.Attribute or ast.Name
         call_qname = attribute_to_qualified_name(node)
+        class_name = self.class_stack[-1]
         if call_qname.startswith("self"):
             # If the call starts with "self", it is a method call, we replace
             # the "self" with the current class name to qualify it.
-            call_qname = self.class_stack[-1] + call_qname[4:]
+            call_qname = class_name + call_qname[4:]
+        if class_name and call_qname.startswith(class_name):
+            # Replace calls from class attributes with their qualified name.
+            # First split the qualified name by the dot separator.
+            split_qname = call_qname.split(".")
+            # Get the types of the currentclasses attributes.
+            current_class_types = self.class_types[class_name]
+            # If the second element in the qualified name matches the name of
+            # the class attribute, replace the reference to the class.attribute
+            # string with the correct type.
+            if split_qname[1] in current_class_types:
+                call_qname = ".".join([current_class_types[split_qname[1]]] +
+                                      split_qname[2:])
         if call_qname in self.classes:
             # If the call ends with the current class name, we replace it with
             # the constructor call, since this is the Python semantics.
@@ -124,6 +141,19 @@ class CallGraphVisitor(ast.NodeVisitor):
         # Visit the arguments of the function call
         for n in node.args + node.keywords:
             self.generic_visit(n)
+
+    def visit_AnnAssign(self, node):
+        """Visit an annotated assignment."""
+        if self.class_stack[-1] == self.namespace_stack[-1]:
+            # Class and namespace stack have the identical last value. This
+            # means we are in a class definition.
+            class_name = self.class_stack[-1]
+            assert isinstance(node.target, ast.Name)
+            attribute_name = node.target.id
+            assert isinstance(node.annotation, ast.Name)
+            attribute_type = node.annotation.id
+            # Populate the class_type datastructure
+            self.class_types[class_name][attribute_name] = attribute_type
 
 
 
