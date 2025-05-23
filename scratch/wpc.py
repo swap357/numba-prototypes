@@ -148,8 +148,12 @@ def main():
     # Create a NamespaceVisitor instance
     cgv = CallGraphVisitor(source_code, source_file)
     cgv .visit_all()
+    print("########## Symbol Table ##########")
     pprint.pp(cgv.functions)
+    print("########## ------------ ##########")
+    print("########## Global Calls ##########")
     pprint.pp(cgv.global_calls)
+    print("########## ------------ ##########")
     return cgv
 
     #compiler = CompilerDriver()
