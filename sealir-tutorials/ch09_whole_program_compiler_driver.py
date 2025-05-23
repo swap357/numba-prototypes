@@ -19,7 +19,7 @@
 # In this chapter we will focus on the development of a "Whole Program Compiler
 # Drive". Essentially this is a high level part of a compiler which ties
 # together the various low-level components developed in the previous chapters.
-# Effectively we will seek to obtain commmand line program that can take a
+# Effectively we will seek to obtain command line program that can take a
 # Python source module and compile the code within.
 #
 # Importantly there are two datastructures which will hold the necessary
@@ -75,7 +75,7 @@ class SymbolInfo:
 # As mentioned above, `the CallGraphVisitor` class is a subclass of the
 # `ast.NodeVisitor`. It is used to traverse the AST and collect information
 # about the functions and their calls. Only a subset of the AST nodes are
-# suppprted by `visit_*` methods. The most important ones are:
+# supported by `visit_*` methods. The most important ones are:
 #
 #   * `visit_FunctionDef`: Visit a function definition
 #   * `visit_ClassDef`: Visit a class definition
@@ -134,7 +134,7 @@ class CallGraphVisitor(ast.NodeVisitor):
             # Replace calls from class attributes with their qualified name.
             # First split the qualified name by the dot separator.
             split_qname = call_qname.split(".")
-            # Get the types of the currentclasses attributes.
+            # Get the types of the current classes attributes.
             current_class_types = self.class_types[class_name]
             # If the second element in the qualified name matches the name of
             # the class attribute, replace the reference to the class.attribute
@@ -240,12 +240,14 @@ def to_graphviz(cgv):
 
     import networkx as nx
     from graphviz import Source
-    # We use the intrafce "adjacency list" to create a networkx DiGraph (directed graph).
-    # Then convert that to a graphviz style graph for visualization using various APIs.
+    # We use the interface "adjacency list" to create a networkx DiGraph
+    # (directed graph).  Then convert that to a graphviz style graph for
+    # visualization using various APIs.
+
     return Source(nx.nx_agraph.to_agraph(nx.DiGraph(cgv.get_call_graph())).string())
 
 
-# ### Main entry point, the command line interface.
+# ### Main function, the command line interface.
 
 def main(args):
     """Entry point for the compiler driver."""
@@ -305,9 +307,11 @@ if __name__ == "__main__":
 
 # ## Rendering the Call Graph with external tools.
 #
-# In this section of this tutorial chapter, we will use the package `networkx` to visualize the call graph.
+# In this section of this tutorial chapter, we will use the package `networkx`
+# to visualize the call graph.
 #
-# As you can see, there are two separate Call Graphs dervied from the top level calls in `llm.py`:
+# As you can see, there are two separate Call Graphs dervied from the top level
+# calls in `llm.py`:
 #
 # * `TransformerLayer.__init__`
 # * `TransformerLayer.forward`
@@ -316,5 +320,4 @@ if __name__ == "__main__":
 
 # TODO how to exclude this from jupyter execution.
 to_graphviz(cgv)
-
 
