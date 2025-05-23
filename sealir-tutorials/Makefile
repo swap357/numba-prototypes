@@ -7,7 +7,7 @@
 # edits on .ipynb will reflect in paired .py, and vice-versa.
 
 # Define source directory and output directory
-PY_FILES := $(wildcard *.py)
+PY_FILES := $(wildcard [ch,demo]*.py)
 IPYNB_FILES := $(patsubst %.py,%.ipynb,$(PY_FILES))
 PAGES_SUBDIR := ../pages/sealir_tutorials
 HTML_FILES := $(patsubst %.ipynb,$(PAGES_SUBDIR)/%.html,$(IPYNB_FILES))
