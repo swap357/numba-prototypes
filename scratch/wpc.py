@@ -62,7 +62,7 @@ class CallGraphVisitor(ast.NodeVisitor):
         function names as strings.
         """
 
-        return {k:tuple(c[1] for c in v.calls) for k,v in nv.functions.items()}
+        return {k:tuple(c[1] for c in v.calls) for k,v in self.functions.items()}
 
     def update_calls(self, node):
         """Update the calls for a function or register a global call."""
