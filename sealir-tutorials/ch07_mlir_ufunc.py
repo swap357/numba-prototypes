@@ -30,7 +30,7 @@ from ch04_2_typeinfer_loops import (
     setup_argtypes,
 )
 from ch05_typeinfer_array import NbOp_ArrayType, NbOp_ArrayDimSymbolic, Type
-from ch06_mlir_backend import ConditionalExtendGraphtoRVSDG as _ExtendEGraphToRVSDG, Backend as _Backend, NbOp_Type
+from ch06_mlir_backend import ConditionalExtendGraphtoRVSDG, Backend as _Backend, NbOp_Type
 
 import mlir.dialects.arith as arith
 import mlir.dialects.math as math
@@ -44,9 +44,12 @@ import mlir.ir as ir
 import mlir.runtime as runtime
 import mlir.passmanager as passmanager
 
+# Type declaration for array elements
 Float64 = NbOp_Type("Float64")
 TypeFloat64 = Type.simple("Float64")
 
+# Define an array using the Float64 dtypes
+# and symbolic dimensions (m, n)
 array_2d_symbolic = NbOp_ArrayType(
     dtype=Float64,
     ndim=2,
@@ -54,115 +57,11 @@ array_2d_symbolic = NbOp_ArrayType(
     shape=(NbOp_ArrayDimSymbolic("m"), NbOp_ArrayDimSymbolic("n")),
 )
 
-
-# @ruleset
-# def ruleset_typeinfer_array_neg(
-#     src_ary: Term,
-#     io: Term,
-#     ary: Term,
-#     ty: Type,
-#     ary_uid: String,
-#     arydesc: ArrayDesc,
-#     itemty: Type,
-# ):
-#     yield rule(
-#         # Implement getitem(int)->scalar
-#         src_ary == Py_NegIO(io, ary),
-#         # ary is array type
-#         ty == TypeVar(ary).getType(),
-#         ty == arydesc.toType(),
-#         # get item type
-#         itemty == arydesc.dtype,
-#     ).then(
-#         # shortcut IO
-#         union(src_ary.getPort(0)).with_(io),
-#         # Rewrite operation
-#         union(src_ary.getPort(1)).with_(
-#             Nb_Array_Neg(io, ary, itemty)
-#         ),
-#         # Return type is ary
-#         set_(TypeVar(src_ary.getPort(1)).getType()).to(ty),
-#     )
-
-
-# @ruleset
-# def ruleset_typeinfer_array_add(
-#     src_ary: Term,
-#     io: Term,
-#     ary_1: Term,
-#     ary_2: Term,
-#     ty: Type,
-#     ary_uid: String,
-#     arydesc: ArrayDesc,
-#     itemty: Type,
-# ):
-#     yield rule(
-#         # Implement getitem(int)->scalar
-#         src_ary == Py_AddIO(io, ary_1, ary_2),
-#         # ary is array type
-#         ty == TypeVar(ary).getType(),
-#         ty == arydesc.toType(),
-#         # get item type
-#         itemty == arydesc.dtype,
-#     ).then(
-#         # shortcut IO
-#         union(src_ary.getPort(0)).with_(io),
-#         # Rewrite operation
-#         union(src_ary.getPort(1)).with_(
-#             Nb_Array_Add(io, ary, itemty)
-#         ),
-#         # Return type is ary
-#         set_(TypeVar(src_ary.getPort(1)).getType()).to(ty),
-#     )
-
-# @function
-# def Nb_Array_Neg(
-#     io: Term, ary: Term, dtype: Type
-# ) -> Term: ...
-
-
-# class NbOp_Array_Neg_Unary(NbOp_Base):
-#     io: SExpr
-#     ary: SExpr
-#     attr: SExpr
-
-
-# @function
-# def Nb_Array_Add(
-#     io: Term, ary_1: Term, ary_2: Term, dtype: Type
-# ) -> Term: ...
-
-
-# class NbOp_Array_Add_Binary(NbOp_Base):
-#     io: SExpr
-#     ary_1: SExpr
-#     ary_2: SExpr
-#     attr: SExpr
-
-
-
-# ### Extend egraph extraction
-   
-class ExtendEGraphToRVSDG(_ExtendEGraphToRVSDG):
-    pass
-#     def handle_Term(self, op: str, children: dict | list, grm: Grammar):
-#         match op, children:
-#             case "Nb_Array_Neg", {
-#                 "io": io,
-#                 "ary": ary,
-#                 "dtype": dtype,
-#             }:
-#                 return grm.write(
-#                     NbOp_Array_Neg_Unary(
-#                         io=io,
-#                         ary=ary,
-#                         attr=grm.write(rg.Attrs(dtype)),
-#                     )
-#                 )
-#         return super().handle_Term(op, children, grm)
-
-
 class Backend(_Backend):
+    # Lower symbolic array to respective memref.
+    # Note: This is not used within ufunc builder,
+    # since it has explicit declaration of the respective
+    # MLIR memrefs. 
     def lower_type(self, ty: NbOp_Type):
         match ty:
             case NbOp_ArrayType(
@@ -173,121 +72,13 @@ class Backend(_Backend):
             ):
                 mlir_dtype = self.lower_type(dtype)
                 with self.loc:
-                    memref_ty=ir.MemRefType.get([10]*ndim, mlir_dtype)
+                    memref_ty=ir.MemRefType.get(shape, mlir_dtype)
                 return memref_ty
         return super().lower_type(ty)
 
 
-    # def lower_expr(self, expr: SExpr, state: LowerStates):
-    #     match expr:
-    #         case NbOp_Array_Neg_Unary(
-    #             io=io, ary=ary, attr=attr
-    #         ):
-    #             io = yield io
-    #             ary = yield ary
-    #             memref_ty = ir.MemRefType.get([10, 10], self.f64)
-    #             ufun = create_unary_ufunc(arith.negf, memref_ty, self.module_body, self.f64)
-    #             res = memref.AllocOp(memref_ty, [], [])
-    #             func.CallOp(ufun, [ary, res])
-    #             return res
-
-    #     return (yield from super().lower_expr(expr, state))
-
-# ufunc_counter=0
-# def create_unary_ufunc(operation, memref_ty, module_body, f64):
-#     global ufunc_counter
-#     ufunc_counter += 1
-#     with module_body:
-#         ufun = func.FuncOp(f"ufunc_{ufunc_counter}", ((memref_ty, memref_ty), ()))
-#         ufun.attributes["llvm.emit_c_interface"] = ir.UnitAttr.get()
-#         uconst_block = ufun.add_entry_block()
-#         uconstant_entry = ir.InsertionPoint(uconst_block)
-
-#         with uconstant_entry:
-#             array_1, res = ufun.arguments
-
-#             indexing_maps = ir.ArrayAttr.get([
-#                 ir.AffineMapAttr.get(ir.AffineMap.get(2, 0, [
-#                     ir.AffineExpr.get_dim(0),
-#                     ir.AffineExpr.get_dim(1),
-#                 ])),
-#                 ir.AffineMapAttr.get(ir.AffineMap.get(2, 0, [
-#                     ir.AffineExpr.get_dim(0),
-#                     ir.AffineExpr.get_dim(1),
-#                 ])),
-#             ])
-#             iterators = ir.ArrayAttr.get([
-#                 ir.Attribute.parse(f"#linalg.iterator_type<parallel>"),
-#                 ir.Attribute.parse(f"#linalg.iterator_type<parallel>"),
-#             ])
-#             matmul = linalg.GenericOp(
-#                 result_tensors=[],
-#                 inputs=[array_1],
-#                 outputs=[res],
-#                 indexing_maps=indexing_maps,
-#                 iterator_types=iterators
-#             )
-
-#             body = matmul.regions[0].blocks.append(f64, f64)
-#             with ir.InsertionPoint(body):
-#                 a, b = body.arguments
-#                 m = operation(a)
-#                 linalg.YieldOp([m])
-#             func.ReturnOp([])
-
-#     return ufun
-
-# def create_binary_ufunc(operation, memref_ty, module_body, f64):
-#     global ufunc_counter
-#     ufunc_counter += 1
-#     with module_body:
-#         ufun = func.FuncOp(f"ufunc_{ufunc_counter}", ((memref_ty, memref_ty, memref_ty), ()))
-#         ufun.attributes["llvm.emit_c_interface"] = ir.UnitAttr.get()
-#         uconst_block = ufun.add_entry_block()
-#         uconstant_entry = ir.InsertionPoint(uconst_block)
-
-#         with uconstant_entry:
-#             array_1, array_2, res = ufun.arguments
-
-#             indexing_maps = ir.ArrayAttr.get([
-#                 ir.AffineMapAttr.get(ir.AffineMap.get(2, 0, [
-#                     ir.AffineExpr.get_dim(0),
-#                     ir.AffineExpr.get_dim(1),
-#                 ])),
-#                 ir.AffineMapAttr.get(ir.AffineMap.get(2, 0, [
-#                     ir.AffineExpr.get_dim(0),
-#                     ir.AffineExpr.get_dim(1),
-#                 ])),
-#                 ir.AffineMapAttr.get(ir.AffineMap.get(2, 0, [
-#                     ir.AffineExpr.get_dim(0),
-#                     ir.AffineExpr.get_dim(1),
-#                 ])),
-#             ])
-#             iterators = ir.ArrayAttr.get([
-#                 ir.Attribute.parse(f"#linalg.iterator_type<parallel>"),
-#                 ir.Attribute.parse(f"#linalg.iterator_type<parallel>"),
-#                 ir.Attribute.parse(f"#linalg.iterator_type<parallel>"),
-#             ])
-#             matmul = linalg.GenericOp(
-#                 result_tensors=[],
-#                 inputs=[array_1, array_2],
-#                 outputs=[res],
-#                 indexing_maps=indexing_maps,
-#                 iterator_types=iterators
-#             )
-
-#             body = matmul.regions[0].blocks.append(f64, f64)
-#             with ir.InsertionPoint(body):
-#                 a, b = body.arguments
-#                 m = operation(a, b)
-#                 linalg.YieldOp([m])
-#             func.ReturnOp([])
-    
-#     return ufun
-
-Float64 = NbOp_Type("Float64")
-
-def ufunc_vectorize(input_types, output_types, shape=None, ndim=None):
+# Decorator function for vecotrization.
+def ufunc_vectorize(input_types, shape=None, ndim=None):
     num_inputs = len(input_types)
 
     def to_input_dtypes(input_tys):
@@ -299,6 +90,7 @@ def ufunc_vectorize(input_types, output_types, shape=None, ndim=None):
 
     def wrapper(inner_func):
         nonlocal ndim
+        # Compile the inner function and get the IR as a module.
         llmod = compiler_pipeline(
             inner_func,
             argtypes=input_types,
@@ -307,11 +99,15 @@ def ufunc_vectorize(input_types, output_types, shape=None, ndim=None):
                 | setup_argtypes(*to_input_dtypes(input_types))
             ),
             verbose=True,
-            converter_class=ExtendEGraphToRVSDG,
+            converter_class=ConditionalExtendGraphtoRVSDG,
             cost_model=MyCostModel(),
             backend=Backend(),
             return_module=True
         )
+
+        # Now within the module declare a seperate function named 
+        # 'ufunc' which acts as a wrapper around the innner 'func'
+
         module_body = ir.InsertionPoint(llmod.body)
         context = llmod.context
         loc = ir.Location.unknown(context=context)
@@ -326,6 +122,9 @@ def ufunc_vectorize(input_types, output_types, shape=None, ndim=None):
                 ndim = len(shape)
                 memref_ty = ir.MemRefType.get(shape, f64)
 
+        # The function 'ufunc' has N + 1 number of arguments 
+        # (where N is the nuber of arguments for the original function)
+        # The extra argument is an explicitly declared resulting array.
         input_typ_outer = (memref_ty,) * (num_inputs + 1)
         with context, loc, module_body:
             fun = func.FuncOp("ufunc", (input_typ_outer, ()))
@@ -333,11 +132,13 @@ def ufunc_vectorize(input_types, output_types, shape=None, ndim=None):
             const_block = fun.add_entry_block()
             constant_entry = ir.InsertionPoint(const_block)
             
+            # Within this function we declare the symbolic representation of
+            # input and output arrays of appropriate shapes using memrefs.
             with constant_entry:
                 arys = fun.arguments[:-1]
                 res = fun.arguments[-1]
-
-                # TODO: Need proper dimensional wiring according to ndim
+                
+                # Affine map declaration
                 indexing_maps = ir.ArrayAttr.get([
                     ir.AffineMapAttr.get(ir.AffineMap.get(ndim, 0, [
                         ir.AffineExpr.get_dim(i) for i in range(ndim)
@@ -353,10 +154,9 @@ def ufunc_vectorize(input_types, output_types, shape=None, ndim=None):
                     indexing_maps=indexing_maps,
                     iterator_types=iterators
                 )
-
+                # Within the affine loop body make calls to the inner function.
                 body = matmul.regions[0].blocks.append(*([f64] * num_inputs))
                 with ir.InsertionPoint(body):
-                    # TODO: Type conversion for different types
                     m = func.CallOp([f64], "func", [*body.arguments])
                     linalg.YieldOp([m])
                 func.ReturnOp([])
@@ -394,9 +194,11 @@ def ufunc_vectorize(input_types, output_types, shape=None, ndim=None):
                 for arg in args:
                     assert arg.ndim == ndim, "Provided ndim doesn't match ufunc definition"
                     assert arg.shape == shape, "Provided arguments have different shapes than each other, this is currently not supported"
-            # TODO: Check args properly with input shape and declare resulting array accordingly
+
+            # Declare the resulting NumPy array of same dtype.
             res_array = np.zeros_like(args[0])
             engine_args = [ctypes.pointer(ctypes.pointer(runtime.get_ranked_memref_descriptor(arg))) for arg in (*args, res_array)]
+            # Invoke function 'ufunc' using memref descriptor representing NumPy arrays. 
             engine.invoke("ufunc", *engine_args)
             return res_array
         
@@ -405,7 +207,7 @@ def ufunc_vectorize(input_types, output_types, shape=None, ndim=None):
     return wrapper
 
 
-@ufunc_vectorize(input_types=[Float64, Float64, Float64], output_types=[Float64], ndim=2)
+@ufunc_vectorize(input_types=[Float64, Float64, Float64], ndim=2)
 def foo(a, b, c):
     x = a + 1.0
     y = b - 2.0
@@ -413,7 +215,7 @@ def foo(a, b, c):
     return x + y + z
 
 if __name__ == "__main__":
-    # create array
+    # Create NumPy arrays 
     ary = np.arange(100, dtype=np.float64).reshape(10, 10)
     ary_2 = np.arange(100, dtype=np.float64).reshape(10, 10)
     ary_3 = np.arange(100, dtype=np.float64).reshape(10, 10)
