@@ -29,6 +29,7 @@ from ch04_2_typeinfer_loops import (
 )
 from ch05_typeinfer_array import NbOp_ArrayType, NbOp_ArrayDimSymbolic, Type
 from ch06_mlir_backend import ConditionalExtendGraphtoRVSDG, Backend as _Backend, NbOp_Type
+from ch07_mlir_ufunc import ufunc_vectorize
 
 import mlir.dialects.linalg as linalg
 import mlir.dialects.func as func
@@ -146,94 +147,19 @@ class GPUBackend(_Backend):
         da.itemsize = arr.itemsize
         return da
 
+    @classmethod
+    def jit_compile_(cls, llmod, input_types, output_types, function_name="func", exec_engine=None, **execution_engine_params):
+        cuda_libs = ("mlir_cuda_runtime", "mlir_c_runner_utils", "mlir_runner_utils")
+        cuda_shared_libs = [find_library(x) for x in cuda_libs]
+        return super().jit_compile_(llmod, input_types, output_types, function_name, exec_engine=execution_engine.ExecutionEngine(llmod, opt_level=3, shared_libs=cuda_shared_libs))
+
+    
 compiler.set_backend(GPUBackend())
 compiler.set_converter_class(ConditionalExtendGraphtoRVSDG)
 compiler.set_cost_model(MyCostModel())
 
-# Decorator function for vecotrization.
-def gpu_vectorize(input_types, shape=None, ndim=None):
-    num_inputs = len(input_types)
 
-    def to_input_dtypes(input_tys):
-        res = []
-        for ty in input_tys:
-            if ty == Float64:
-                res.append(TypeFloat64)
-        return tuple(res)
-
-    def wrapper(inner_func):
-        nonlocal ndim
-        # Compile the inner function and get the IR as a module.
-        llmod, func_egraph = compiler.lower_py_fn(
-            inner_func,
-            argtypes=input_types,
-            ruleset=(
-                base_ruleset
-                | setup_argtypes(*to_input_dtypes(input_types))
-            ),
-        )
-
-        # Now within the module declare a seperate function named 
-        # 'ufunc' which acts as a wrapper around the innner 'func'
-        with llmod.context, ir.Location.unknown(context=llmod.context), ir.InsertionPoint(llmod.body):
-            f64 = ir.F64Type.get()
-
-            if ndim is not None:
-                memref_ty = ir.MemRefType.get([ir.ShapedType.get_dynamic_size()] * ndim, f64)
-            elif shape is not None:
-                ndim = len(shape)
-                memref_ty = ir.MemRefType.get(shape, f64)
-            
-            # The function 'ufunc' has N + 1 number of arguments 
-            # (where N is the nuber of arguments for the original function)
-            # The extra argument is an explicitly declared resulting array.
-            input_typ_outer = (memref_ty,) * (num_inputs + 1)
-
-            fun = func.FuncOp("ufunc", (input_typ_outer, ()))
-            fun.attributes["llvm.emit_c_interface"] = ir.UnitAttr.get()
-            const_block = fun.add_entry_block()
-            constant_entry = ir.InsertionPoint(const_block)
-
-            # Within this function we declare the symbolic representation of
-            # input and output arrays of appropriate shapes using memrefs.
-            with constant_entry:
-                arys = fun.arguments[:-1]
-                res = fun.arguments[-1]
-
-                # Affine map declaration
-                indexing_maps = ir.ArrayAttr.get([
-                    ir.AffineMapAttr.get(ir.AffineMap.get(ndim, 0, [
-                        ir.AffineExpr.get_dim(i) for i in range(ndim)
-                    ])),
-                ] * (num_inputs + 1))
-                iterators = ir.ArrayAttr.get([
-                    ir.Attribute.parse(f"#linalg.iterator_type<parallel>")
-                ] * (num_inputs + 1))
-                matmul = linalg.GenericOp(
-                    result_tensors=[],
-                    inputs=arys,
-                    outputs=[res],
-                    indexing_maps=indexing_maps,
-                    iterator_types=iterators
-                )
-                # Within the affine loop body make calls to the inner function.
-                body = matmul.regions[0].blocks.append(*([f64] * num_inputs))
-                with ir.InsertionPoint(body):
-                    m = func.CallOp([f64], "func", [*body.arguments])
-                    linalg.YieldOp([m])
-                func.ReturnOp([])
-
-        compiler.run_backend_passes(llmod)
-        cuda_libs = ("mlir_cuda_runtime", "mlir_c_runner_utils", "mlir_runner_utils")
-        cuda_shared_libs = [find_library(x) for x in cuda_libs]
-        jit_func = compiler.compile_module_(llmod, [memref_ty] * num_inputs, (memref_ty,), "ufunc",
-                                            exec_engine=execution_engine.ExecutionEngine(llmod, opt_level=3, shared_libs=cuda_shared_libs))
-        return jit_func
-
-    return wrapper
-
-
-@gpu_vectorize(input_types=[Float64, Float64, Float64], ndim=2)
+@ufunc_vectorize(input_types=[Float64, Float64, Float64], ndim=2)
 def foo(a, b, c):
     x = a + 1.0
     y = b - 2.0
