@@ -101,8 +101,7 @@ class GPUBackend(_Backend):
             val = 0.0 if val is None else val
             ptr = ctypes.pointer(ctypes.c_double(val))
         elif isinstance(mlir_ty, ir.MemRefType):
-            # TODO: Remove this hardcoded shape value
-            val = np.zeros((10, 10)) if val is None else val
+            val = np.zeros(mlir_ty.shape) if val is None else val
             ptr = ctypes.pointer(ctypes.pointer(runtime.get_ranked_memref_descriptor(cls.np_arr_to_np_duck_device_arr(val))))
 
         if out_val:
@@ -132,7 +131,7 @@ compiler.set_converter_class(ConditionalExtendGraphtoRVSDG)
 compiler.set_cost_model(MyCostModel())
 
 
-@ufunc_vectorize(input_types=[Float64, Float64, Float64], ndim=2)
+@ufunc_vectorize(input_types=[Float64, Float64, Float64], shape=(10, 10))
 def foo(a, b, c):
     x = a + 1.0
     y = b - 2.0

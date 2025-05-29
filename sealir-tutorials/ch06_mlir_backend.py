@@ -462,8 +462,7 @@ class Backend:
             val = 0.0 if val is None else val
             ptr = ctypes.pointer(ctypes.c_double(val))
         elif isinstance(mlir_ty, ir.MemRefType):
-            # TODO: Remove this hardcoded shape value
-            val = np.zeros((10, 10)) if val is None else val
+            val = np.zeros(mlir_ty.shape) if val is None else val
             ptr = ctypes.pointer(ctypes.pointer(runtime.get_ranked_memref_descriptor(val)))
 
         if out_val:

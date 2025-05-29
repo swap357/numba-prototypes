@@ -71,7 +71,7 @@ compiler.set_converter_class(ConditionalExtendGraphtoRVSDG)
 compiler.set_cost_model(MyCostModel())
 
 # Decorator function for vecotrization.
-def ufunc_vectorize(input_types, shape=None, ndim=None):
+def ufunc_vectorize(input_types, shape):
     num_inputs = len(input_types)
 
     def to_input_dtypes(input_tys):
@@ -82,7 +82,6 @@ def ufunc_vectorize(input_types, shape=None, ndim=None):
         return tuple(res)
 
     def wrapper(inner_func):
-        nonlocal ndim
         # Compile the inner function and get the IR as a module.
         llmod, func_egraph = compiler.lower_py_fn(
             inner_func,
@@ -98,12 +97,9 @@ def ufunc_vectorize(input_types, shape=None, ndim=None):
         with llmod.context, ir.Location.unknown(context=llmod.context), ir.InsertionPoint(llmod.body):
             f64 = ir.F64Type.get()
 
-            if ndim is not None:
-                memref_ty = ir.MemRefType.get([ir.ShapedType.get_dynamic_size()] * ndim, f64)
-            elif shape is not None:
-                ndim = len(shape)
-                memref_ty = ir.MemRefType.get(shape, f64)
-            
+            ndim = len(shape)
+            memref_ty = ir.MemRefType.get(shape, f64)
+
             # The function 'ufunc' has N + 1 number of arguments 
             # (where N is the nuber of arguments for the original function)
             # The extra argument is an explicitly declared resulting array.
@@ -151,7 +147,7 @@ def ufunc_vectorize(input_types, shape=None, ndim=None):
     return wrapper
 
 
-@ufunc_vectorize(input_types=[Float64, Float64, Float64], ndim=2)
+@ufunc_vectorize(input_types=[Float64, Float64, Float64], shape=(10, 10))
 def foo(a, b, c):
     x = a + 1.0
     y = b - 2.0
