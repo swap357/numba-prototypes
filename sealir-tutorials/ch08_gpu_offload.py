@@ -20,50 +20,23 @@
 from __future__ import annotations
 
 import numpy as np
-from ch04_1_typeinfer_ifelse import TypeFloat64
 from ch04_2_typeinfer_loops import (
     MyCostModel,
-    base_ruleset,
     compiler,
-    setup_argtypes,
 )
-from ch05_typeinfer_array import NbOp_ArrayType, NbOp_ArrayDimSymbolic, Type
+from ch05_typeinfer_array import NbOp_ArrayType
 from ch06_mlir_backend import ConditionalExtendGraphtoRVSDG, Backend as _Backend, NbOp_Type
-from ch07_mlir_ufunc import ufunc_vectorize
+from ch07_mlir_ufunc import ufunc_vectorize, Float64
 
-import mlir.dialects.linalg as linalg
-import mlir.dialects.func as func
 import mlir.ir as ir
-
-import mlir.dialects.arith as arith
-import mlir.dialects.affine as affine
-import mlir.dialects.memref as memref
-import mlir.dialects.scf as scf
-import mlir.dialects.func as func
-import mlir.dialects.linalg as linalg
-import mlir.dialects.bufferization as bufferization
 import mlir.execution_engine as execution_engine
-import mlir.ir as ir
 import mlir.runtime as runtime
 import mlir.passmanager as passmanager
 import ctypes
 from ctypes.util import find_library
-import numpy as np
 from numba import cuda
 from collections import namedtuple
 
-# Type declaration for array elements
-Float64 = NbOp_Type("Float64")
-TypeFloat64 = Type.simple("Float64")
-
-# Define an array using the Float64 dtypes
-# and symbolic dimensions (m, n)
-array_2d_symbolic = NbOp_ArrayType(
-    dtype=Float64,
-    ndim=2,
-    datalayout="c_contiguous",
-    shape=(NbOp_ArrayDimSymbolic("m"), NbOp_ArrayDimSymbolic("n")),
-)
 _DEBUG = True
 
 class GPUBackend(_Backend):
@@ -153,7 +126,7 @@ class GPUBackend(_Backend):
         cuda_shared_libs = [find_library(x) for x in cuda_libs]
         return super().jit_compile_(llmod, input_types, output_types, function_name, exec_engine=execution_engine.ExecutionEngine(llmod, opt_level=3, shared_libs=cuda_shared_libs))
 
-    
+
 compiler.set_backend(GPUBackend())
 compiler.set_converter_class(ConditionalExtendGraphtoRVSDG)
 compiler.set_cost_model(MyCostModel())
