@@ -19,8 +19,6 @@
 
 from __future__ import annotations
 
-import ctypes
-
 import numpy as np
 from ch04_1_typeinfer_ifelse import TypeFloat64
 from ch04_2_typeinfer_loops import (
@@ -32,17 +30,9 @@ from ch04_2_typeinfer_loops import (
 from ch05_typeinfer_array import NbOp_ArrayType, NbOp_ArrayDimSymbolic, Type
 from ch06_mlir_backend import ConditionalExtendGraphtoRVSDG, Backend as _Backend, NbOp_Type
 
-import mlir.dialects.arith as arith
-import mlir.dialects.math as math
-import mlir.dialects.memref as memref
 import mlir.dialects.linalg as linalg
-import mlir.dialects.cf as cf
 import mlir.dialects.func as func
-import mlir.dialects.scf as scf
-import mlir.execution_engine as execution_engine
 import mlir.ir as ir
-import mlir.runtime as runtime
-import mlir.passmanager as passmanager
 
 # Type declaration for array elements
 Float64 = NbOp_Type("Float64")
@@ -155,29 +145,8 @@ def ufunc_vectorize(input_types, shape=None, ndim=None):
 
         compiler.run_backend_passes(llmod)
 
-        engine = execution_engine.ExecutionEngine(llmod)
-
-        def inner_wrapper(*args):
-            nonlocal shape
-            nonlocal ndim
-            assert len(args) == num_inputs, "Number of provided arguments doesn't match definition"
-            if shape is not None:
-                for arg in args:
-                    assert arg.shape == shape, "Provided shape doesn't match ufunc definition"
-            elif ndim is not None:
-                shape = args[0].shape
-                for arg in args:
-                    assert arg.ndim == ndim, "Provided ndim doesn't match ufunc definition"
-                    assert arg.shape == shape, "Provided arguments have different shapes than each other, this is currently not supported"
-
-            # Declare the resulting NumPy array of same dtype.
-            res_array = np.zeros_like(args[0])
-            engine_args = [ctypes.pointer(ctypes.pointer(runtime.get_ranked_memref_descriptor(arg))) for arg in (*args, res_array)]
-            # Invoke function 'ufunc' using memref descriptor representing NumPy arrays. 
-            engine.invoke("ufunc", *engine_args)
-            return res_array
-        
-        return inner_wrapper
+        jit_func = compiler.compile_module_(llmod, [memref_ty] * num_inputs, (memref_ty,), "ufunc")
+        return jit_func
 
     return wrapper
 

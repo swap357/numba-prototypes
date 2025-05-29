@@ -578,12 +578,14 @@ class Compiler():
 
         return module, extracted
 
-    def run_backend_passes(self, module, passes="cpu"):
-        self.backend.run_passes(module, passes)
+    def run_backend_passes(self, module):
+        self.backend.run_passes(module)
 
-    def compile_module(self, module, egraph_node):
-        return self.backend.jit_compile(module, egraph_node)
+    def compile_module(self, module, egraph_node, func_name="func"):
+        return self.backend.jit_compile(module, egraph_node, func_name)
 
+    def compile_module_(self, llmod, input_types, output_types, function_name="func", exec_engine=None, **execution_engine_params):
+        return self.backend.jit_compile_(llmod, input_types, output_types, function_name, exec_engine, **execution_engine_params)
 
 # + [markdown] jp-MarkdownHeadingCollapsed=true
 # ### Define EGraph functions for new operations:
@@ -1265,7 +1267,7 @@ class Backend:
 
         raise NotImplementedError(expr)
 
-    def jit_compile(self, llmod: ir.Module, func_node: rg.Func):
+    def jit_compile(self, llmod: ir.Module, func_node: rg.Func, func_name):
         sym = func_node.fname
         # Create JIT
         lljit = llvm.create_lljit_compiler()

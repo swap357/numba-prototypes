@@ -173,52 +173,25 @@ class Backend:
 
         return module
 
-    def run_passes(self, module, passes):
-        if passes == "cpu":
-            module.dump()
-            pass_man = passmanager.PassManager(context=module.context)
-            
-            pass_man.add("convert-linalg-to-loops")
-            pass_man.add("convert-scf-to-cf")
-            pass_man.add("finalize-memref-to-llvm")
-            pass_man.add("convert-func-to-llvm")
-            pass_man.add("convert-index-to-llvm")
-            pass_man.add("reconcile-unrealized-casts")
+    def run_passes(self, module):
+        module.dump()
 
-            pass_man.enable_verifier(True)
-            pass_man.run(module.operation)
-            # Output LLVM-dialect MLIR
-            module.dump()
-        elif passes == "gpu":
-            context = module.context
-            if _DEBUG:
-                context.enable_multithreading(False)
-            pass_man = passmanager.PassManager(context=context)
-            if _DEBUG:
-                pass_man.enable_ir_printing()
+        if _DEBUG:
+            module.context.enable_multithreading(False)
+        if _DEBUG:
+            pass_man.enable_ir_printing()
 
-            pass_man.add("convert-linalg-to-affine-loops")
-            pass_man.add("affine-loop-fusion")
-            pass_man.add("func.func(affine-parallelize)")
-            pass_man.add("builtin.module(func.func(gpu-map-parallel-loops,convert-parallel-loops-to-gpu))")
-            pass_man.add("lower-affine")
-            pass_man.add("scf-parallel-loop-fusion")
-            pass_man.add('func.func(gpu-map-parallel-loops,convert-parallel-loops-to-gpu)')
-            pass_man.add("gpu-kernel-outlining")
-            pass_man.add('gpu-lower-to-nvvm-pipeline{cubin-format="fatbin"}')
-            pass_man.add("convert-scf-to-cf")
-            pass_man.add("finalize-memref-to-llvm")
-            pass_man.add("convert-func-to-llvm")
-            pass_man.add("convert-index-to-llvm")
-            pass_man.add("convert-bufferization-to-memref")
-            pass_man.add("reconcile-unrealized-casts")
-            pass_man.add("func.func(llvm-request-c-wrappers)")
-            pass_man.enable_verifier(True)
-            pass_man.run(module.operation)
-        else:
-            # Try to parse the passes string
-            assert isinstance(passes, str)
-            
+        pass_man = passmanager.PassManager(context=module.context)           
+        pass_man.add("convert-linalg-to-loops")
+        pass_man.add("convert-scf-to-cf")
+        pass_man.add("finalize-memref-to-llvm")
+        pass_man.add("convert-func-to-llvm")
+        pass_man.add("convert-index-to-llvm")
+        pass_man.add("reconcile-unrealized-casts")
+        pass_man.enable_verifier(True)
+        pass_man.run(module.operation)
+        # Output LLVM-dialect MLIR
+        module.dump()
         return module
 
     def lower_expr(self, expr: SExpr, state: LowerStates):
@@ -418,7 +391,7 @@ class Backend:
             case _:
                 raise NotImplementedError(expr, type(expr))
 
-    def jit_compile(self, llmod, func_node: rg.Func):
+    def jit_compile(self, llmod, func_node: rg.Func, func_name="func"):
         attributes = Attributes(func_node.body.begin.attrs)
         # Convert SealIR types into MLIR types
         with self.loc:
@@ -433,34 +406,21 @@ class Backend:
                 )
             ),
         )
-        # Converts the MLIR module into a JIT-callable function.
-        return JitCallable.from_pointer(llmod, input_types, output_types)
-
-
-def get_exec_ptr(mlir_ty, val):
-    if isinstance(mlir_ty, ir.IntegerType):
-        return ctypes.pointer(ctypes.c_int64(val))
-    elif isinstance(mlir_ty, ir.F32Type):
-        return ctypes.pointer(ctypes.c_float(val))
-    elif isinstance(mlir_ty, ir.F64Type):
-        return ctypes.pointer(ctypes.c_double(val))
-    elif isinstance(mlir_ty, ir.MemRefType):
-        return ctypes.pointer(ctypes.pointer(runtime.get_ranked_memref_descriptor(val)))
-
-
-@dataclass(frozen=True)
-class JitCallable:
-    jit_func: Callable
+        return self.jit_compile_(llmod, input_types, output_types)
 
     @classmethod
-    def from_pointer(cls, jit_module, input_types, output_types):
+    def jit_compile_(cls, llmod, input_types, output_types, function_name="func", exec_engine=None, **execution_engine_params):
+        # Converts the MLIR module into a JIT-callable function.
         # Use MLIR's own internal execution engine
-        engine = execution_engine.ExecutionEngine(jit_module)
-
+        if exec_engine is None:
+            engine = execution_engine.ExecutionEngine(llmod, **execution_engine_params)
+        else:
+            engine = exec_engine
+    
         assert (
             len(output_types) == 1
         ), "Execution of functions with output arguments > 1 not supported"
-        res_ptr = get_exec_ptr(output_types[0], 0)
+        res_ptr, res_val = cls.get_exec_ptr(output_types[0], None, out_val = True)
 
         # Build a wrapper function
         def jit_func(*input_args):
@@ -474,7 +434,7 @@ class JitCallable:
             # the internal execution engine should
             # be C-Type pointers.
             input_exec_ptrs = [
-                get_exec_ptr(ty, val)
+                cls.get_exec_ptr(ty, val)
                 for ty, val in zip(input_types, input_args)
             ]
             # Invokes the function that we built, internally calls
@@ -483,13 +443,33 @@ class JitCallable:
             # appended to the end of all input pointers in the invoke call.
             engine.invoke(function_name, *input_exec_ptrs, res_ptr)
 
-            return res_ptr.contents.value
+            if isinstance(res_val, np.ndarray):
+                return res_val
+            else:
+                return res_ptr.contents.value
 
-        return cls(jit_func)
+        return jit_func
 
-    def __call__(self, *args: Any) -> Any:
-        return self.jit_func(*args)
+    @classmethod
+    def get_exec_ptr(cls, mlir_ty, val, out_val=False):
+        if isinstance(mlir_ty, ir.IntegerType):
+            val = 0 if val is None else val
+            ptr = ctypes.pointer(ctypes.c_int64(val))
+        elif isinstance(mlir_ty, ir.F32Type):
+            val = 0.0 if val is None else val
+            ptr = ctypes.pointer(ctypes.c_float(val))
+        elif isinstance(mlir_ty, ir.F64Type):
+            val = 0.0 if val is None else val
+            ptr = ctypes.pointer(ctypes.c_double(val))
+        elif isinstance(mlir_ty, ir.MemRefType):
+            # TODO: Remove this hardcoded shape value
+            val = np.zeros((10, 10)) if val is None else val
+            ptr = ctypes.pointer(ctypes.pointer(runtime.get_ranked_memref_descriptor(val)))
 
+        if out_val:
+            return ptr, val
+        else:
+            return ptr
 
 # + [markdown] jp-MarkdownHeadingCollapsed=true
 # Example 1: simple if-else
