@@ -26,7 +26,7 @@ from ch04_1_typeinfer_ifelse import TypeFloat64
 from ch04_2_typeinfer_loops import (
     MyCostModel,
     base_ruleset,
-    compiler_pipeline,
+    compiler,
     setup_argtypes,
 )
 from ch05_typeinfer_array import NbOp_ArrayType, NbOp_ArrayDimSymbolic, Type
@@ -76,6 +76,9 @@ class Backend(_Backend):
                 return memref_ty
         return super().lower_type(ty)
 
+compiler.set_backend(Backend())
+compiler.set_converter_class(ConditionalExtendGraphtoRVSDG)
+compiler.set_cost_model(MyCostModel())
 
 # Decorator function for vecotrization.
 def ufunc_vectorize(input_types, shape=None, ndim=None):
@@ -91,53 +94,42 @@ def ufunc_vectorize(input_types, shape=None, ndim=None):
     def wrapper(inner_func):
         nonlocal ndim
         # Compile the inner function and get the IR as a module.
-        llmod = compiler_pipeline(
+        llmod, func_egraph = compiler.lower_py_fn(
             inner_func,
             argtypes=input_types,
             ruleset=(
                 base_ruleset
                 | setup_argtypes(*to_input_dtypes(input_types))
             ),
-            verbose=True,
-            converter_class=ConditionalExtendGraphtoRVSDG,
-            cost_model=MyCostModel(),
-            backend=Backend(),
-            return_module=True
         )
 
         # Now within the module declare a seperate function named 
         # 'ufunc' which acts as a wrapper around the innner 'func'
+        with llmod.context, ir.Location.unknown(context=llmod.context), ir.InsertionPoint(llmod.body):
+            f64 = ir.F64Type.get()
 
-        module_body = ir.InsertionPoint(llmod.body)
-        context = llmod.context
-        loc = ir.Location.unknown(context=context)
-
-        f64 = ir.F64Type.get(context=context)
-        index_type = ir.IndexType.get(context=context)
-
-        with context, loc:
             if ndim is not None:
                 memref_ty = ir.MemRefType.get([ir.ShapedType.get_dynamic_size()] * ndim, f64)
             elif shape is not None:
                 ndim = len(shape)
                 memref_ty = ir.MemRefType.get(shape, f64)
+            
+            # The function 'ufunc' has N + 1 number of arguments 
+            # (where N is the nuber of arguments for the original function)
+            # The extra argument is an explicitly declared resulting array.
+            input_typ_outer = (memref_ty,) * (num_inputs + 1)
 
-        # The function 'ufunc' has N + 1 number of arguments 
-        # (where N is the nuber of arguments for the original function)
-        # The extra argument is an explicitly declared resulting array.
-        input_typ_outer = (memref_ty,) * (num_inputs + 1)
-        with context, loc, module_body:
             fun = func.FuncOp("ufunc", (input_typ_outer, ()))
             fun.attributes["llvm.emit_c_interface"] = ir.UnitAttr.get()
             const_block = fun.add_entry_block()
             constant_entry = ir.InsertionPoint(const_block)
-            
+
             # Within this function we declare the symbolic representation of
             # input and output arrays of appropriate shapes using memrefs.
             with constant_entry:
                 arys = fun.arguments[:-1]
                 res = fun.arguments[-1]
-                
+
                 # Affine map declaration
                 indexing_maps = ir.ArrayAttr.get([
                     ir.AffineMapAttr.get(ir.AffineMap.get(ndim, 0, [
@@ -161,24 +153,7 @@ def ufunc_vectorize(input_types, shape=None, ndim=None):
                     linalg.YieldOp([m])
                 func.ReturnOp([])
 
-        llmod.dump()
-        pass_man = passmanager.PassManager(context=context)
-
-        # pass_man.add("lower-affine")
-        # pass_man.add("convert-tensor-to-linalg")
-        # pass_man.add("convert-linalg-to-affine-loops")
-        # pass_man.add("affine-loop-fusion")
-        # pass_man.add("affine-parallelize")
-
-        pass_man.add("convert-linalg-to-loops")
-        pass_man.add("convert-scf-to-cf")
-        pass_man.add("finalize-memref-to-llvm")
-        pass_man.add("convert-func-to-llvm")
-        pass_man.add("convert-index-to-llvm")
-        pass_man.add("reconcile-unrealized-casts")
-        pass_man.enable_verifier(True)
-        pass_man.run(llmod.operation)
-        llmod.dump()
+        compiler.run_backend_passes(llmod)
 
         engine = execution_engine.ExecutionEngine(llmod)
 

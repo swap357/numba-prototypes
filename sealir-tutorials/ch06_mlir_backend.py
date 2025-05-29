@@ -64,7 +64,7 @@ from ch04_1_typeinfer_ifelse import (
 )
 from ch04_1_typeinfer_ifelse import base_ruleset as if_else_ruleset
 from ch04_1_typeinfer_ifelse import (
-    compiler_pipeline,
+    compiler,
     ruleset_type_infer_float,
     setup_argtypes,
 )
@@ -77,6 +77,7 @@ from ch04_2_typeinfer_loops import (
 from ch04_2_typeinfer_loops import base_ruleset as loop_ruleset
 from utils import IN_NOTEBOOK
 
+_DEBUG = False
 
 @dataclass(frozen=True)
 class LowerStates(ase.TraverseState):
@@ -105,7 +106,7 @@ class Backend:
                 return self.f64
         raise NotImplementedError(f"unknown type: {ty}")
 
-    def lower(self, root: rg.Func, argtypes, ignore_passes=False):
+    def lower(self, root: rg.Func, argtypes):
         context = self.context
         self.loc = loc = ir.Location.unknown(context=context)
         self.module = module = ir.Module.create(loc=loc)
@@ -170,26 +171,54 @@ class Backend:
         with context, loc, constant_entry:
             cf.br([], fun.body.blocks[1])
 
-        module.dump()
-        if ignore_passes:
-            return module
+        return module
+
+    def run_passes(self, module, passes):
+        if passes == "cpu":
+            module.dump()
+            pass_man = passmanager.PassManager(context=module.context)
+            
+            pass_man.add("convert-linalg-to-loops")
+            pass_man.add("convert-scf-to-cf")
+            pass_man.add("finalize-memref-to-llvm")
+            pass_man.add("convert-func-to-llvm")
+            pass_man.add("convert-index-to-llvm")
+            pass_man.add("reconcile-unrealized-casts")
+
+            pass_man.enable_verifier(True)
+            pass_man.run(module.operation)
+            # Output LLVM-dialect MLIR
+            module.dump()
+        elif passes == "gpu":
+            context = module.context
+            if _DEBUG:
+                context.enable_multithreading(False)
+            pass_man = passmanager.PassManager(context=context)
+            if _DEBUG:
+                pass_man.enable_ir_printing()
+
+            pass_man.add("convert-linalg-to-affine-loops")
+            pass_man.add("affine-loop-fusion")
+            pass_man.add("func.func(affine-parallelize)")
+            pass_man.add("builtin.module(func.func(gpu-map-parallel-loops,convert-parallel-loops-to-gpu))")
+            pass_man.add("lower-affine")
+            pass_man.add("scf-parallel-loop-fusion")
+            pass_man.add('func.func(gpu-map-parallel-loops,convert-parallel-loops-to-gpu)')
+            pass_man.add("gpu-kernel-outlining")
+            pass_man.add('gpu-lower-to-nvvm-pipeline{cubin-format="fatbin"}')
+            pass_man.add("convert-scf-to-cf")
+            pass_man.add("finalize-memref-to-llvm")
+            pass_man.add("convert-func-to-llvm")
+            pass_man.add("convert-index-to-llvm")
+            pass_man.add("convert-bufferization-to-memref")
+            pass_man.add("reconcile-unrealized-casts")
+            pass_man.add("func.func(llvm-request-c-wrappers)")
+            pass_man.enable_verifier(True)
+            pass_man.run(module.operation)
         else:
-            return self.run_passes(module, context)
-
-    def run_passes(self, module, context):
-        pass_man = passmanager.PassManager(context=context)
-        
-        pass_man.add("convert-linalg-to-loops")
-        pass_man.add("convert-scf-to-cf")
-        pass_man.add("finalize-memref-to-llvm")
-        pass_man.add("convert-func-to-llvm")
-        pass_man.add("convert-index-to-llvm")
-        pass_man.add("reconcile-unrealized-casts")
-
-        pass_man.enable_verifier(True)
-        pass_man.run(module.operation)
-        # Output LLVM-dialect MLIR
-        module.dump()
+            # Try to parse the passes string
+            assert isinstance(passes, str)
+            
         return module
 
     def lower_expr(self, expr: SExpr, state: LowerStates):
@@ -454,7 +483,7 @@ class JitCallable:
             # appended to the end of all input pointers in the invoke call.
             engine.invoke(function_name, *input_exec_ptrs, res_ptr)
 
-            return res_val
+            return res_ptr.contents.value
 
         return cls(jit_func)
 
@@ -475,20 +504,22 @@ def example_1(a, b):
     return z + a
 
 
+compiler.set_converter_class(ConditionalExtendGraphtoRVSDG)
+compiler.set_backend(Backend())
+compiler.set_cost_model(MyCostModel())
+
 if __name__ == "__main__":
-    jt = compiler_pipeline(
+    llvm_module, func_egraph = compiler.lower_py_fn(
         example_1,
         argtypes=(Int64, Int64),
         ruleset=(if_else_ruleset | setup_argtypes(TypeInt64, TypeInt64)),
-        verbose=True,
-        converter_class=ConditionalExtendGraphtoRVSDG,
-        cost_model=MyCostModel(),
-        backend=Backend(),
     )
+    compiler.run_backend_passes(llvm_module)
+    jit_func = compiler.compile_module(llvm_module, func_egraph)
     args = (10, 33)
-    run_test(example_1, jt, args, verbose=True)
+    run_test(example_1, jit_func, args, verbose=True)
     args = (7, 3)
-    run_test(example_1, jt, args, verbose=True)
+    run_test(example_1, jit_func, args, verbose=True)
 
 
 # ## Example 2: add `float()`
@@ -506,7 +537,7 @@ def example_2(a, b):
 
 
 if __name__ == "__main__":
-    jt = compiler_pipeline(
+    llvm_module, func_egraph = compiler.lower_py_fn(
         example_2,
         argtypes=(Int64, Int64),
         ruleset=(
@@ -514,15 +545,13 @@ if __name__ == "__main__":
             | setup_argtypes(TypeInt64, TypeInt64)
             | ruleset_type_infer_float  # < --- added for float()
         ),
-        verbose=True,
-        converter_class=ConditionalExtendGraphtoRVSDG,
-        cost_model=MyCostModel(),
-        backend=Backend(),
     )
+    compiler.run_backend_passes(llvm_module)
+    jit_func = compiler.compile_module(llvm_module, func_egraph)
     args = (10, 33)
-    run_test(example_2, jt, args, verbose=True)
+    run_test(example_2, jit_func, args, verbose=True)
     args = (7, 3)
-    run_test(example_2, jt, args, verbose=True)
+    run_test(example_2, jit_func, args, verbose=True)
 
 # ## Example 3: Simple while loop example
 
@@ -536,17 +565,18 @@ def example_3(init, n):
     return c
 
 
+compiler.set_converter_class(LoopExtendEGraphToRVSDG)
+
 if __name__ == "__main__":
-    jt = compiler_pipeline(
+    llvm_module, func_egraph = compiler.lower_py_fn(
         example_3,
         argtypes=(Int64, Int64),
         ruleset=loop_ruleset | setup_argtypes(TypeInt64, TypeInt64),
-        verbose=True,
-        converter_class=LoopExtendEGraphToRVSDG,
-        cost_model=MyCostModel(),
-        backend=Backend(),
     )
-    run_test(example_3, jt, (10, 7), verbose=True)
+    compiler.run_backend_passes(llvm_module)
+    jit_func = compiler.compile_module(llvm_module, func_egraph)
+
+    run_test(example_3, jit_func, (10, 7), verbose=True)
 
 
 # ## Example 4: Nested Loop example
@@ -565,13 +595,12 @@ def example_4(init, n):
 
 
 if __name__ == "__main__":
-    jt = compiler_pipeline(
+    llvm_module, func_egraph = compiler.lower_py_fn(
         example_4,
         argtypes=(Int64, Int64),
         ruleset=loop_ruleset | setup_argtypes(TypeInt64, TypeInt64),
-        verbose=True,
-        converter_class=LoopExtendEGraphToRVSDG,
-        cost_model=MyCostModel(),
-        backend=Backend(),
     )
-    run_test(example_4, jt, (10, 7), verbose=True)
+    compiler.run_backend_passes(llvm_module)
+    jit_func = compiler.compile_module(llvm_module, func_egraph)
+
+    run_test(example_4, jit_func, (10, 7), verbose=True)
