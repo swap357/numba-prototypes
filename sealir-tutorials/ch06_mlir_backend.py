@@ -38,7 +38,6 @@ from sealir import ase
 from sealir.rvsdg import grammar as rg
 from sealir.rvsdg import internal_prefix
 import numpy as np
-import numba
 
 from ch03_egraph_program_rewrites import (
     run_test,
@@ -422,7 +421,7 @@ class Backend:
         assert (
             len(output_types) == 1
         ), "Execution of functions with output arguments > 1 not supported"
-        res_ptr, res_val = cls.get_exec_ptr(output_types[0], None, out_val = True)
+        res_ptr, res_val = cls.get_exec_ptr(output_types[0], None)
 
         # Build a wrapper function
         def jit_func(*input_args):
@@ -436,7 +435,7 @@ class Backend:
             # the internal execution engine should
             # be C-Type pointers.
             input_exec_ptrs = [
-                cls.get_exec_ptr(ty, val)
+                cls.get_exec_ptr(ty, val)[0]
                 for ty, val in zip(input_types, input_args)
             ]
             # Invokes the function that we built, internally calls
@@ -445,15 +444,12 @@ class Backend:
             # appended to the end of all input pointers in the invoke call.
             engine.invoke(function_name, *input_exec_ptrs, res_ptr)
 
-            if isinstance(res_val, (np.ndarray, numba.cuda.cudadrv.devicearray.DeviceNDArray)):
-                return res_val
-            else:
-                return res_ptr.contents.value
+            return cls.get_out_val(res_ptr, res_val)
 
         return jit_func
 
     @classmethod
-    def get_exec_ptr(cls, mlir_ty, val, out_val=False):
+    def get_exec_ptr(cls, mlir_ty, val):
         if isinstance(mlir_ty, ir.IntegerType):
             val = 0 if val is None else val
             ptr = ctypes.pointer(ctypes.c_int64(val))
@@ -467,10 +463,14 @@ class Backend:
             val = np.zeros(mlir_ty.shape) if val is None else val
             ptr = ctypes.pointer(ctypes.pointer(runtime.get_ranked_memref_descriptor(val)))
 
-        if out_val:
-            return ptr, val
+        return ptr, val
+    
+    @classmethod
+    def get_out_val(cls, res_ptr, res_val):
+        if isinstance(res_val, np.ndarray):
+            return res_val
         else:
-            return ptr
+            return res_ptr.contents.value
 
 # + [markdown] jp-MarkdownHeadingCollapsed=true
 # Example 1: simple if-else

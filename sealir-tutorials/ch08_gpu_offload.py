@@ -94,7 +94,7 @@ class GPUBackend(_Backend):
         return module
 
     @classmethod
-    def get_exec_ptr(cls, mlir_ty, val, out_val=False):
+    def get_exec_ptr(cls, mlir_ty, val):
         if isinstance(mlir_ty, ir.IntegerType):
             val = 0 if val is None else val
             ptr = ctypes.pointer(ctypes.c_int64(val))
@@ -109,11 +109,15 @@ class GPUBackend(_Backend):
             val = cls.np_arr_to_np_duck_device_arr(val)
             ptr = ctypes.pointer(ctypes.pointer(runtime.get_ranked_memref_descriptor(val)))
 
-        if out_val:
-            return ptr, val
-        else:
-            return ptr
+        return ptr, val
     
+    @classmethod
+    def get_out_val(cls, res_ptr, res_val):
+        if isinstance(res_val, cuda.cudadrv.devicearray.DeviceNDArray):
+            return res_val.copy_to_host()
+        else:
+            return super().get_out_val(res_ptr, res_val)
+
     @classmethod
     def np_arr_to_np_duck_device_arr(cls, arr):
         da = cuda.to_device(arr)
@@ -150,5 +154,5 @@ if __name__ == "__main__":
     ary_3 = np.arange(100, dtype=np.float64).reshape(10, 10)
 
     got = foo(ary, ary_2, ary_3)
-    print("Got", got.copy_to_host())
+    print("Got", got)
 
