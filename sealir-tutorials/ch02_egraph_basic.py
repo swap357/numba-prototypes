@@ -71,7 +71,7 @@ if __name__ == "__main__":
 
     egraph = EGraph()
     egraph.let("root", GraphRoot(func))
-    egraph.display(graphviz=True)
+    # egraph.display(graphviz=True)
 
 # ### Extract from EGraph
 #
@@ -86,8 +86,8 @@ if __name__ == "__main__":
 # prioritize the variant that aligns with their specific optimization goals.
 #
 
-if __name__ == "__main__":
-    help(egraph_extraction)
+# if __name__ == "__main__":
+#     help(egraph_extraction)
 
 # Here, we will use the default cost model, which is based on the node count.
 
@@ -128,9 +128,9 @@ def compiler_pipeline(fn, *, verbose=False):
         # the encoding into and out of egraph.
         root = GraphRoot(func)
         egraph.let("root", root)
-        if verbose:
+        # if verbose:
             # For inspecting the egraph
-            egraph.display(graphviz=True)
+            # egraph.display(graphviz=True)
 
     cost, extracted = middle_end(rvsdg_expr, define_egraph)
     print("Extracted from EGraph".center(80, "="))

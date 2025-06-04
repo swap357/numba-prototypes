@@ -124,7 +124,7 @@ def ufunc_vectorize(input_types, shape):
                 ] * (num_inputs + 1))
                 iterators = ir.ArrayAttr.get([
                     ir.Attribute.parse(f"#linalg.iterator_type<parallel>")
-                ] * (num_inputs + 1))
+                ] * (1 + 1))
                 matmul = linalg.GenericOp(
                     result_tensors=[],
                     inputs=arys,
@@ -133,9 +133,9 @@ def ufunc_vectorize(input_types, shape):
                     iterator_types=iterators
                 )
                 # Within the affine loop body make calls to the inner function.
-                body = matmul.regions[0].blocks.append(*([f64] * num_inputs))
+                body = matmul.regions[0].blocks.append(*([f64] * (num_inputs + 1)))
                 with ir.InsertionPoint(body):
-                    m = func.CallOp([f64], "func", [*body.arguments])
+                    m = func.CallOp([f64], "func", [*body.arguments[:-1]])
                     linalg.YieldOp([m])
                 func.ReturnOp([])
 

@@ -33,10 +33,12 @@ import mlir.runtime as runtime
 
 import mlir.ir as ir
 import mlir.passmanager as passmanager
+import numba.cuda
 from sealir import ase
 from sealir.rvsdg import grammar as rg
 from sealir.rvsdg import internal_prefix
 import numpy as np
+import numba
 
 from ch03_egraph_program_rewrites import (
     run_test,
@@ -443,7 +445,7 @@ class Backend:
             # appended to the end of all input pointers in the invoke call.
             engine.invoke(function_name, *input_exec_ptrs, res_ptr)
 
-            if isinstance(res_val, np.ndarray):
+            if isinstance(res_val, (np.ndarray, numba.cuda.cudadrv.devicearray.DeviceNDArray)):
                 return res_val
             else:
                 return res_ptr.contents.value

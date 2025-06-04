@@ -36,6 +36,9 @@ import ctypes
 from ctypes.util import find_library
 from numba import cuda
 from collections import namedtuple
+import gc
+
+gc.disable()
 
 _DEBUG = True
 
@@ -69,6 +72,7 @@ class GPUBackend(_Backend):
 
         pass_man.add("convert-linalg-to-affine-loops")
         pass_man.add("affine-loop-fusion")
+        pass_man.add("inline")
         pass_man.add("func.func(affine-parallelize)")
         pass_man.add("builtin.module(func.func(gpu-map-parallel-loops,convert-parallel-loops-to-gpu))")
         pass_man.add("lower-affine")
@@ -101,8 +105,8 @@ class GPUBackend(_Backend):
             val = 0.0 if val is None else val
             ptr = ctypes.pointer(ctypes.c_double(val))
         elif isinstance(mlir_ty, ir.MemRefType):
-            val = np.zeros(mlir_ty.shape) if val is None else val
-            ptr = ctypes.pointer(ctypes.pointer(runtime.get_ranked_memref_descriptor(cls.np_arr_to_np_duck_device_arr(val))))
+            val = cls.np_arr_to_np_duck_device_arr(np.zeros(mlir_ty.shape, dtype=np.float64)) if val is None else val
+            ptr = ctypes.pointer(ctypes.pointer(runtime.get_ranked_memref_descriptor(val)))
 
         if out_val:
             return ptr, val
@@ -145,5 +149,5 @@ if __name__ == "__main__":
     ary_3 = np.arange(100, dtype=np.float64).reshape(10, 10)
 
     got = foo(ary, ary_2, ary_3)
-    print("Got", got)
+    print("Got", got.copy_to_host())
 
