@@ -74,7 +74,7 @@ from ch04_2_typeinfer_loops import (
     TypeInt64,
     TypeVar,
     base_ruleset,
-    compiler,
+    Compiler,
     setup_argtypes,
 )
 from utils import IN_NOTEBOOK
@@ -402,9 +402,7 @@ array_int64_1d, array_infos = array_desc_rules(
     "array_int64_1d", shape=("n",), dtype=TypeInt64, layout="c"
 )
 
-compiler.set_converter_class(ExtendEGraphToRVSDG)
-compiler.set_cost_model(MyCostModel())
-compiler.set_backend(Backend())
+compiler = Compiler(ExtendEGraphToRVSDG, Backend(), MyCostModel(), True)
 
 if __name__ == "__main__":
     # compile

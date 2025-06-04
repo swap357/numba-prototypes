@@ -65,7 +65,7 @@ from ch04_1_typeinfer_ifelse import (
 )
 from ch04_1_typeinfer_ifelse import base_ruleset as if_else_ruleset
 from ch04_1_typeinfer_ifelse import (
-    compiler,
+    Compiler,
     ruleset_type_infer_float,
     setup_argtypes,
 )
@@ -484,10 +484,7 @@ def example_1(a, b):
         z = b - a
     return z + a
 
-
-compiler.set_converter_class(ConditionalExtendGraphtoRVSDG)
-compiler.set_backend(Backend())
-compiler.set_cost_model(MyCostModel())
+compiler = Compiler(ConditionalExtendGraphtoRVSDG, Backend(), MyCostModel(), True)
 
 if __name__ == "__main__":
     llvm_module, func_egraph = compiler.lower_py_fn(
@@ -545,8 +542,7 @@ def example_3(init, n):
         i = i + 1
     return c
 
-
-compiler.set_converter_class(LoopExtendEGraphToRVSDG)
+compiler = Compiler(LoopExtendEGraphToRVSDG, Backend(), MyCostModel(), True)
 
 if __name__ == "__main__":
     llvm_module, func_egraph = compiler.lower_py_fn(

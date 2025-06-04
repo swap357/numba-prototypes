@@ -47,9 +47,9 @@ def compiler_pipeline(fn, *, verbose=False, ruleset):
         root = GraphRoot(func)
         egraph.let("root", root)
         egraph.run(ruleset.saturate())
-        # if verbose:
-        #     # For inspecting the egraph
-        #     egraph.display(graphviz=True)
+        if verbose:
+            # For inspecting the egraph
+            egraph.display(graphviz=True)
 
     cost, extracted = middle_end(rvsdg_expr, define_egraph)
     print("Extracted from EGraph".center(80, "="))

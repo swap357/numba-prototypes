@@ -487,22 +487,13 @@ class CompilationError(Exception):
     pass
 
 
-class Compiler():
-    def __init__(self, converter_class, backend, cost_model, verbose=False):
-        self.converter_class = converter_class
-        self.backend = backend
-        self.cost_model = cost_model
-        self.verbose = verbose
+@dataclass
+class Compiler:
+    converter_class: Backend
+    backend: int
+    cost_model: CostModel
+    verbose: EGraphToRVSDG
 
-    def set_converter_class(self, converter_class):
-        self.converter_class = converter_class
-
-    def set_backend(self, backend):
-        self.backend = backend
-
-    def set_cost_model(self, cost_model):
-        self.cost_model = cost_model
-    
     def run_frontend(self, fn):
         rvsdg_expr, dbginfo = frontend(fn)
         return rvsdg_expr, dbginfo

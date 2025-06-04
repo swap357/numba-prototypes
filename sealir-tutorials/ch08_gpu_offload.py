@@ -22,7 +22,7 @@ from __future__ import annotations
 import numpy as np
 from ch04_2_typeinfer_loops import (
     MyCostModel,
-    compiler,
+    Compiler,
 )
 from ch05_typeinfer_array import NbOp_ArrayType
 from ch06_mlir_backend import ConditionalExtendGraphtoRVSDG, Backend as _Backend, NbOp_Type
@@ -36,9 +36,6 @@ import ctypes
 from ctypes.util import find_library
 from numba import cuda
 from collections import namedtuple
-import gc
-
-gc.disable()
 
 _DEBUG = True
 
@@ -135,12 +132,9 @@ class GPUBackend(_Backend):
         return super().jit_compile_(llmod, input_types, output_types, function_name, exec_engine=execution_engine.ExecutionEngine(llmod, opt_level=3, shared_libs=cuda_shared_libs))
 
 
-compiler.set_backend(GPUBackend())
-compiler.set_converter_class(ConditionalExtendGraphtoRVSDG)
-compiler.set_cost_model(MyCostModel())
+gpu_compiler = Compiler(ConditionalExtendGraphtoRVSDG, GPUBackend(), MyCostModel(), True)
 
-
-@ufunc_vectorize(input_types=[Float64, Float64, Float64], shape=(10, 10))
+@ufunc_vectorize(input_types=[Float64, Float64, Float64], shape=(10, 10), ufunc_compiler=gpu_compiler)
 def foo(a, b, c):
     x = a + 1.0
     y = b - 2.0

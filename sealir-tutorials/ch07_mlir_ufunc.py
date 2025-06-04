@@ -24,7 +24,7 @@ from ch04_1_typeinfer_ifelse import TypeFloat64
 from ch04_2_typeinfer_loops import (
     MyCostModel,
     base_ruleset,
-    compiler,
+    Compiler,
     setup_argtypes,
 )
 from ch05_typeinfer_array import NbOp_ArrayType, NbOp_ArrayDimSymbolic, Type
@@ -66,12 +66,8 @@ class Backend(_Backend):
                 return memref_ty
         return super().lower_type(ty)
 
-compiler.set_backend(Backend())
-compiler.set_converter_class(ConditionalExtendGraphtoRVSDG)
-compiler.set_cost_model(MyCostModel())
-
 # Decorator function for vecotrization.
-def ufunc_vectorize(input_types, shape):
+def ufunc_vectorize(input_types, shape, ufunc_compiler):
     num_inputs = len(input_types)
 
     def to_input_dtypes(input_tys):
@@ -83,7 +79,7 @@ def ufunc_vectorize(input_types, shape):
 
     def wrapper(inner_func):
         # Compile the inner function and get the IR as a module.
-        llmod, func_egraph = compiler.lower_py_fn(
+        llmod, func_egraph = ufunc_compiler.lower_py_fn(
             inner_func,
             argtypes=input_types,
             ruleset=(
@@ -139,15 +135,16 @@ def ufunc_vectorize(input_types, shape):
                     linalg.YieldOp([m])
                 func.ReturnOp([])
 
-        compiler.run_backend_passes(llmod)
+        ufunc_compiler.run_backend_passes(llmod)
 
-        jit_func = compiler.compile_module_(llmod, [memref_ty] * num_inputs, (memref_ty,), "ufunc")
+        jit_func = ufunc_compiler.compile_module_(llmod, [memref_ty] * num_inputs, (memref_ty,), "ufunc")
         return jit_func
 
     return wrapper
 
+compiler = Compiler(ConditionalExtendGraphtoRVSDG, Backend(), MyCostModel(), True)
 
-@ufunc_vectorize(input_types=[Float64, Float64, Float64], shape=(10, 10))
+@ufunc_vectorize(input_types=[Float64, Float64, Float64], shape=(10, 10), ufunc_compiler=compiler)
 def foo(a, b, c):
     x = a + 1.0
     y = b - 2.0

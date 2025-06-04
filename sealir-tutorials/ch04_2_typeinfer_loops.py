@@ -66,7 +66,7 @@ from ch04_1_typeinfer_ifelse import (
 )
 from ch04_1_typeinfer_ifelse import base_ruleset as _ch4_1_base_ruleset
 from ch04_1_typeinfer_ifelse import (
-    compiler,
+    Compiler,
     ruleset_failed_to_unify,
     ruleset_type_infer_failure_report,
     ruleset_type_infer_float,
@@ -289,9 +289,7 @@ def example_1(init, n):
     return c
 
 
-compiler.set_converter_class(ExtendEGraphToRVSDG)
-compiler.set_cost_model(MyCostModel())
-compiler.set_backend(Backend())
+compiler = Compiler(ExtendEGraphToRVSDG, Backend(), MyCostModel(), True)
 
 if __name__ == "__main__":
     llvm_module, func_egraph = compiler.lower_py_fn(
