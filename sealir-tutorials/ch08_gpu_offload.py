@@ -105,7 +105,8 @@ class GPUBackend(_Backend):
             val = 0.0 if val is None else val
             ptr = ctypes.pointer(ctypes.c_double(val))
         elif isinstance(mlir_ty, ir.MemRefType):
-            val = cls.np_arr_to_np_duck_device_arr(np.zeros(mlir_ty.shape, dtype=np.float64)) if val is None else val
+            val = np.zeros(mlir_ty.shape, dtype=np.float64) if val is None else val
+            val = cls.np_arr_to_np_duck_device_arr(val)
             ptr = ctypes.pointer(ctypes.pointer(runtime.get_ranked_memref_descriptor(val)))
 
         if out_val:
