@@ -134,7 +134,7 @@ class GPUBackend(_Backend):
 
 gpu_compiler = Compiler(ConditionalExtendGraphtoRVSDG, GPUBackend(), MyCostModel(), True)
 
-@ufunc_vectorize(input_types=[Float64, Float64, Float64], shape=(10, 10), ufunc_compiler=gpu_compiler)
+@ufunc_vectorize(input_type=Float64, shape=(10, 10), ufunc_compiler=gpu_compiler)
 def foo(a, b, c):
     x = a + 1.0
     y = b - 2.0

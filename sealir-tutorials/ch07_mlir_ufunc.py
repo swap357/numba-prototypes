@@ -18,16 +18,15 @@
 # In this chapter, we'll look at type inference for array operations.
 
 from __future__ import annotations
+import inspect
 
 import numpy as np
-from ch04_1_typeinfer_ifelse import TypeFloat64
 from ch04_2_typeinfer_loops import (
     MyCostModel,
-    base_ruleset,
     Compiler,
     setup_argtypes,
 )
-from ch05_typeinfer_array import NbOp_ArrayType, NbOp_ArrayDimSymbolic, Type
+from ch05_typeinfer_array import NbOp_ArrayType, NbOp_ArrayDimSymbolic, Type, base_ruleset
 from ch06_mlir_backend import ConditionalExtendGraphtoRVSDG, Backend as _Backend, NbOp_Type
 
 import mlir.dialects.linalg as linalg
@@ -37,15 +36,8 @@ import mlir.ir as ir
 # Type declaration for array elements
 Float64 = NbOp_Type("Float64")
 TypeFloat64 = Type.simple("Float64")
-
-# Define an array using the Float64 dtypes
-# and symbolic dimensions (m, n)
-array_2d_symbolic = NbOp_ArrayType(
-    dtype=Float64,
-    ndim=2,
-    datalayout="c_contiguous",
-    shape=(NbOp_ArrayDimSymbolic("m"), NbOp_ArrayDimSymbolic("n")),
-)
+Float32 = NbOp_Type("Float32")
+TypeFloat32 = Type.simple("Float32")
 
 class Backend(_Backend):
     # Lower symbolic array to respective memref.
@@ -67,34 +59,45 @@ class Backend(_Backend):
         return super().lower_type(ty)
 
 # Decorator function for vecotrization.
-def ufunc_vectorize(input_types, shape, ufunc_compiler):
-    num_inputs = len(input_types)
-
-    def to_input_dtypes(input_tys):
-        res = []
-        for ty in input_tys:
-            if ty == Float64:
-                res.append(TypeFloat64)
-        return tuple(res)
+def ufunc_vectorize(input_type, shape, ufunc_compiler, extra_ruleset=None):
+    def to_input_dtypes(ty):
+        if ty == Float64:
+            return TypeFloat64
+        elif ty == Float32:
+            return TypeFloat32
 
     def wrapper(inner_func):
+        sig = inspect.signature(inner_func)
+        num_inputs = len(sig.parameters)
+        ruleset = (
+                base_ruleset
+                | setup_argtypes(*(to_input_dtypes(input_type),)*num_inputs)
+            )
+        if extra_ruleset is not None:
+            ruleset |= extra_ruleset
         # Compile the inner function and get the IR as a module.
         llmod, func_egraph = ufunc_compiler.lower_py_fn(
             inner_func,
-            argtypes=input_types,
-            ruleset=(
-                base_ruleset
-                | setup_argtypes(*to_input_dtypes(input_types))
-            ),
+            argtypes=(input_type,)*num_inputs,
+            ruleset=ruleset,
         )
 
         # Now within the module declare a seperate function named 
         # 'ufunc' which acts as a wrapper around the innner 'func'
         with llmod.context, ir.Location.unknown(context=llmod.context), ir.InsertionPoint(llmod.body):
+            f32 = ir.F32Type.get()
             f64 = ir.F64Type.get()
 
+            match input_type.name:
+                case 'Float32':
+                    internal_dtype = f32
+                case 'Float64':
+                    internal_dtype = f64
+                case _ :
+                    raise TypeError("The current input type is not supported")
+
             ndim = len(shape)
-            memref_ty = ir.MemRefType.get(shape, f64)
+            memref_ty = ir.MemRefType.get(shape, internal_dtype)
 
             # The function 'ufunc' has N + 1 number of arguments 
             # (where N is the nuber of arguments for the original function)
@@ -129,9 +132,9 @@ def ufunc_vectorize(input_types, shape, ufunc_compiler):
                     iterator_types=iterators
                 )
                 # Within the affine loop body make calls to the inner function.
-                body = matmul.regions[0].blocks.append(*([f64] * (num_inputs + 1)))
+                body = matmul.regions[0].blocks.append(*([internal_dtype] * (num_inputs + 1)))
                 with ir.InsertionPoint(body):
-                    m = func.CallOp([f64], "func", [*body.arguments[:-1]])
+                    m = func.CallOp([internal_dtype], "func", [*body.arguments[:-1]])
                     linalg.YieldOp([m])
                 func.ReturnOp([])
 
@@ -144,7 +147,7 @@ def ufunc_vectorize(input_types, shape, ufunc_compiler):
 
 compiler = Compiler(ConditionalExtendGraphtoRVSDG, Backend(), MyCostModel(), True)
 
-@ufunc_vectorize(input_types=[Float64, Float64, Float64], shape=(10, 10), ufunc_compiler=compiler)
+@ufunc_vectorize(input_type=Float64, shape=(10, 10), ufunc_compiler=compiler)
 def foo(a, b, c):
     x = a + 1.0
     y = b - 2.0

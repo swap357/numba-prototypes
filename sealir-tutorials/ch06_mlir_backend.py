@@ -94,6 +94,7 @@ function_name = "func"
 class Backend:
     def __init__(self):
         self.context = context = ir.Context()
+        self.f32 = ir.F32Type.get(context=context)
         self.f64 = ir.F64Type.get(context=context)
         self.i32 = ir.IntegerType.get_signless(32, context=context)
         self.i64 = ir.IntegerType.get_signless(64, context=context)
@@ -105,6 +106,8 @@ class Backend:
                 return self.i64
             case NbOp_Type("Float64"):
                 return self.f64
+            case NbOp_Type("Float32"):
+                return self.f32
         raise NotImplementedError(f"unknown type: {ty}")
 
     def lower(self, root: rg.Func, argtypes):
@@ -186,6 +189,7 @@ class Backend:
         pass_man.add("convert-linalg-to-loops")
         pass_man.add("convert-scf-to-cf")
         pass_man.add("finalize-memref-to-llvm")
+        pass_man.add("convert-math-to-libm")
         pass_man.add("convert-func-to-llvm")
         pass_man.add("convert-index-to-llvm")
         pass_man.add("reconcile-unrealized-casts")
@@ -460,7 +464,13 @@ class Backend:
             val = 0.0 if val is None else val
             ptr = ctypes.pointer(ctypes.c_double(val))
         elif isinstance(mlir_ty, ir.MemRefType):
-            val = np.zeros(mlir_ty.shape) if val is None else val
+            if isinstance(mlir_ty.element_type, ir.F64Type):
+                np_dtype = np.float64
+            elif isinstance(mlir_ty.element_type, ir.F32Type):
+                np_dtype = np.float32
+            else:
+                raise TypeError("The current array element type is not supported")
+            val = np.zeros(mlir_ty.shape, dtype=np_dtype) if val is None else val
             ptr = ctypes.pointer(ctypes.pointer(runtime.get_ranked_memref_descriptor(val)))
 
         return ptr, val
