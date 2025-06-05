@@ -17,7 +17,7 @@
 # ## About
 #
 # In this chapter we will focus on the development of a "Whole Program Compiler
-# Drive". Essentially this is a high level part of a compiler which ties
+# Driver". Essentially this is a high level part of a compiler which ties
 # together the various low-level components developed in the previous chapters.
 # Effectively we will seek to obtain command line program that can take a
 # Python source module and compile the code within.
