@@ -24,6 +24,8 @@ from egglog import EGraph, Unit, function, i64, rewrite, rule, ruleset
 from sealir import rvsdg
 from sealir.eqsat import rvsdg_eqsat
 from sealir.eqsat.rvsdg_eqsat import GraphRoot, Term, TermList
+from egglog_to_inference import tokenize, parse_sexps, to_latex, sexp_to_string
+from utils import IN_NOTEBOOK
 
 # We'll be extending from chapter 2.
 from ch02_egraph_basic import (
@@ -180,6 +182,23 @@ if __name__ == "__main__":
         | ruleset_const_propagate
         | ruleset_const_fold_if_else  # <-- the new rule for if-else
     )
+
+    # Visualize the ruleset structure
+    demo_egraph = EGraph(save_egglog_string=True)
+    demo_egraph.run(my_ruleset)
+    egglog_str = demo_egraph.as_egglog_string
+    tokens = tokenize(egglog_str)
+    sexps = parse_sexps(tokens)
+
+    if IN_NOTEBOOK:
+        from IPython.display import display, Math
+
+        for sexp in sexps:
+            tex = to_latex(sexp)
+            if tex:
+                print(sexp_to_string(sexp))
+                display(Math(tex))
+                print()
 
     jt = compiler_pipeline(ifelse_fold, verbose=True, ruleset=my_ruleset)
     run_test(ifelse_fold, jt, (12, 34))
