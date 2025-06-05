@@ -27,7 +27,7 @@
 # Table](https://en.wikipedia.org/wiki/Symbol_table) and the second is a [Call
 # Graph](https://en.wikipedia.org/wiki/Call_graph).
 #
-# The Symbol Table is a mapping structure that maps symbol names to symbol
+# The "Symbol Table" is a mapping structure that maps symbol names to symbol
 # information. Concretely for the case of a Python function compiler, this will
 # map functions to various pieces of information about these functions. In our
 # case we consider classes to be syntactic sugar and we consider methods to be
@@ -36,10 +36,10 @@
 # consist of three parts:
 #
 #  * The fully qualified name of the function
-#  * the complete ast.AST node for the function
+#  * the complete `ast.AST` node for the function
 #  * any calls that can be statically determined
 #
-# The Call Graph represents the relationships between functions. It is a
+# The "Call Graph" represents the relationships between functions. It is a
 # directed graph where each node maps to a function and the children are the
 # calls within the function. It represents the ordering of calls for a given
 # function and thus can be used to schedule the compilation of functions. The
