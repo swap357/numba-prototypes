@@ -24,7 +24,7 @@ from egglog import EGraph, Unit, function, i64, rewrite, rule, ruleset
 from sealir import rvsdg
 from sealir.eqsat import rvsdg_eqsat
 from sealir.eqsat.rvsdg_eqsat import GraphRoot, Term, TermList
-from egglog_to_inference import tokenize, parse_sexps, to_latex, sexp_to_string
+from egglog_to_latex import tokenize, parse_sexps, to_latex, sexp_to_string
 from utils import IN_NOTEBOOK
 
 # We'll be extending from chapter 2.
