@@ -55,6 +55,7 @@
 # ### Imports
 
 import ast
+import os
 import pprint
 import symtable
 import sys
@@ -252,7 +253,7 @@ def to_graphviz(cgv):
 def main(args):
     """Entry point for the compiler driver."""
     if len(args) < 2:
-        print("Usage: python wpc.py <python_source_file>")
+        print(f"Usage: python {os.path.basename(__file__)} <python_source_file>")
         sys.exit(1)
 
     source_file = args[1]
