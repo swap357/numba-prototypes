@@ -83,7 +83,7 @@ def gelu_tanh_forward(a):
         * a
         * (
             dt(1)
-            + np.sqrt(dt(2) / dt(np.pi)) * (a + dt(0.044715) * a**3)
+            + np.tanh(np.sqrt(dt(2) / dt(np.pi)) * (a + dt(0.044715) * a**3))
         )
     )
     return result
@@ -385,7 +385,7 @@ class Backend(UfuncBackend):
                 return arith.sitofp(self.f32, val)
             case NpyOp_Tanh_Float32(val):
                 val = yield val
-                return math.tanh(val)
+                return arith.divf(math.sinh(val), math.cosh(val))
             case NpyOp_Sqrt_Float32(val):
                 val = yield val
                 return math.sqrt(val)
@@ -503,13 +503,11 @@ if __name__ == "__main__":
     relclose = lambda x, y: np.allclose(x, y, rtol=1e-6)
     run_test(gelu_tanh_forward, jit_func, (0.234,), equal=relclose)
 
-if __name__ == "__main__":
     vectorized_gelu = ufunc_vectorize(input_type=Float32, shape=(10,), ufunc_compiler=compiler, extra_ruleset=additional_rules)(gelu_tanh_forward)
     relclose = lambda x, y: np.allclose(x, y, rtol=1e-6)
     input_val = np.array([0.234]*10, dtype=np.float32)
     run_test(gelu_tanh_forward, vectorized_gelu, (input_val,), equal=relclose)
 
-if __name__ == "__main__":
     class Backend2(Backend, GPUBackend):
         pass
     
