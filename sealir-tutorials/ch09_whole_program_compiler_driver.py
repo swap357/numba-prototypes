@@ -128,7 +128,7 @@ class CallGraphVisitor(ast.NodeVisitor):
         call_qname = attribute_to_qualified_name(node)
         # Get the current class name, if we are visiting a class and have a
         # method.
-        class_name, method_name = (None, None
+        class_name, method_name = ((None, None)
                                    if not (self.class_stack
                                            and self.namespace_stack)
                                    else (self.class_stack[-1],
