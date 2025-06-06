@@ -341,6 +341,10 @@ if __name__ == "__main__":
 # are calls to Numpy, a library who's source is outside of the module. Thus we
 # must assume that these will be resolved at a later stage.
 
-# TODO how to exclude this from jupyter execution.
-to_graphviz(cgv)
+def visualize():
+    return to_graphviz(cgv)
+# UNCOMMENT IN JUPYTER TO VIEW GRAPH
+#visualize()
+
+
 
