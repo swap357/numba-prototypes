@@ -45,5 +45,30 @@ def test_call_graph():
                                 'FeedForwardNetwork.__init__'),
     'TransformerLayer.forward': ('self.self_attn.forward',
                                 'self.feed_forward.forward')}
+    expected = {
+        'softmax': ('np.exp', 'np.max', 'np.sum'),
+        'scaled_dot_product_attention': ('query.reshape',
+                                         'key.reshape',
+                                         'value.reshape',
+                                         'np.matmul',
+                                         'np.sqrt',
+                                         'softmax',
+                                         'np.matmul',
+                                         'context.reshape'),
+        'MultiHeadAttention.__init__': (),
+        'MultiHeadAttention.split_heads': ('x.reshape', 'x.transpose'),
+        'MultiHeadAttention.combine_heads': ('x.transpose.reshape',),
+        'MultiHeadAttention.forward': ('MultiHeadAttention.split_heads',
+                                       'MultiHeadAttention.split_heads',
+                                       'MultiHeadAttention.split_heads',
+                                       'scaled_dot_product_attention',
+                                       'MultiHeadAttention.combine_heads'),
+        'FeedForwardNetwork.__init__': ('np.random.randn', 'np.random.randn'),
+        'FeedForwardNetwork.forward': ('np.matmul', 'np.matmul'),
+        'TransformerLayer.__init__': ('MultiHeadAttention.__init__',
+                                      'FeedForwardNetwork.__init__'),
+        'TransformerLayer.forward': ('MultiHeadAttention.forward',
+                                     'FeedForwardNetwork.forward')
+    }
 
     assert expected == received
