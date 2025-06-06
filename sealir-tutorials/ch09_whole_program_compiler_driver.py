@@ -295,6 +295,9 @@ def main(args):
     print("########## Global Calls ##########")
     pprint.pp(cgv.global_calls)
     print("########## ------------ ##########")
+    print("########## Call Graph   ##########")
+    pprint.pp(cgv.get_call_graph())
+    print("########## ------------ ##########")
     return cgv
 
 # ### Entrypoint and example
