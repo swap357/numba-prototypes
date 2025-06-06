@@ -43,4 +43,7 @@ clean:
 	rm -f $(HTML_FILES)
 	rm -df $(PAGES_SUBDIR)
 
-.PHONE: all sync dump
+test:
+	pytest -n auto tests
+
+.PHONY: all sync dump test
