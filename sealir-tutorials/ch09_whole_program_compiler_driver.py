@@ -271,7 +271,7 @@ def main(args):
     # Create a NamespaceVisitor instance
     cgv = CallGraphVisitor(source_code, source_file)
     # Visit all nodes in the AST
-    cgv .visit_all()
+    cgv.visit_all()
     # Print the symbol table and list of calls
     print("########## Symbol Table ##########")
     pprint.pp(cgv.functions)
