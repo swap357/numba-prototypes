@@ -62,6 +62,8 @@ import sys
 from collections import defaultdict
 from dataclasses import dataclass
 
+from utils import IN_NOTEBOOK
+
 
 # ### Symbol Information class
 
@@ -341,10 +343,8 @@ if __name__ == "__main__":
 # are calls to Numpy, a library who's source is outside of the module. Thus we
 # must assume that these will be resolved at a later stage.
 
-def visualize():
-    return to_graphviz(cgv)
-# UNCOMMENT IN JUPYTER TO VIEW GRAPH
-#visualize()
+if IN_NOTEBOOK:
+    to_graphviz(cgv)
 
 
 
