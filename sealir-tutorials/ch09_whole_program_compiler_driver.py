@@ -124,7 +124,7 @@ class CallGraphVisitor(ast.NodeVisitor):
 
     def update_calls(self, node):
         """Update the calls for a function or register a global call."""
-        # Flatten the name of the call from ast.Attribute or ast.Name
+        # Flatten the name of the call from ast.Attribute or ast.Name.
         call_qname = attribute_to_qualified_name(node)
         # Get the current class name, if we are visiting a class and have a
         # method.
