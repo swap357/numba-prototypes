@@ -83,7 +83,7 @@ def gelu_tanh_forward(a):
         * a
         * (
             dt(1)
-            + np.tanh(np.sqrt(dt(2) / dt(np.pi)) * (a + dt(0.044715) * a**3))
+            + np.sqrt(dt(2) / dt(np.pi)) * (a + dt(0.044715) * a**3)
         )
     )
     return result

@@ -71,7 +71,6 @@ class GPUBackend(_Backend):
         pass_man.add("affine-loop-fusion")
         pass_man.add("inline")
         pass_man.add("func.func(affine-parallelize)")
-        pass_man.add("convert-math-to-libm")
         pass_man.add("builtin.module(func.func(gpu-map-parallel-loops,convert-parallel-loops-to-gpu))")
         pass_man.add("lower-affine")
         pass_man.add("scf-parallel-loop-fusion")
@@ -103,7 +102,13 @@ class GPUBackend(_Backend):
             val = 0.0 if val is None else val
             ptr = ctypes.pointer(ctypes.c_double(val))
         elif isinstance(mlir_ty, ir.MemRefType):
-            val = np.zeros(mlir_ty.shape, dtype=np.float64) if val is None else val
+            if isinstance(mlir_ty.element_type, ir.F64Type):
+                np_dtype = np.float64
+            elif isinstance(mlir_ty.element_type, ir.F32Type):
+                np_dtype = np.float32
+            else:
+                raise TypeError("The current array element type is not supported")
+            val = np.zeros(mlir_ty.shape, dtype=np_dtype) if val is None else val
             val = cls.np_arr_to_np_duck_device_arr(val)
             ptr = ctypes.pointer(ctypes.pointer(runtime.get_ranked_memref_descriptor(val)))
 
