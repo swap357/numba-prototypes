@@ -128,9 +128,11 @@ class CallGraphVisitor(ast.NodeVisitor):
         call_qname = attribute_to_qualified_name(node)
         # Get the current class name, if we are visiting a class and have a
         # method.
-        class_name, method_name = (self.class_stack[-1], self.namespace_stack[-1]
-                                   if self.class_stack and self.namespace_stack
-                                   else None, None)
+        class_name, method_name = (None, None
+                                   if not (self.class_stack
+                                           and self.namespace_stack)
+                                   else (self.class_stack[-1],
+                                         self.namespace_stack[-1]))
         # Get the name of the first paramater (usually 'self') of the method
         # call using symtable module. If we are in a class, we assume this is a
         # method call indeed.  TODO: account for @staticmethod and
