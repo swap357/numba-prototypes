@@ -145,16 +145,17 @@ def ufunc_vectorize(input_type, shape, ufunc_compiler, extra_ruleset=None):
 
     return wrapper
 
-compiler = Compiler(ConditionalExtendGraphtoRVSDG, Backend(), MyCostModel(), True)
-
-@ufunc_vectorize(input_type=Float64, shape=(10, 10), ufunc_compiler=compiler)
-def foo(a, b, c):
-    x = a + 1.0
-    y = b - 2.0
-    z = c + 3.0
-    return x + y + z
 
 if __name__ == "__main__":
+    compiler = Compiler(ConditionalExtendGraphtoRVSDG, Backend(), MyCostModel(), True)
+
+    @ufunc_vectorize(input_type=Float64, shape=(10, 10), ufunc_compiler=compiler)
+    def foo(a, b, c):
+        x = a + 1.0
+        y = b - 2.0
+        z = c + 3.0
+        return x + y + z
+
     # Create NumPy arrays 
     ary = np.arange(100, dtype=np.float64).reshape(10, 10)
     ary_2 = np.arange(100, dtype=np.float64).reshape(10, 10)

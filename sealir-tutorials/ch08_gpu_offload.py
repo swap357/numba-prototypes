@@ -71,6 +71,7 @@ class GPUBackend(_Backend):
         pass_man.add("affine-loop-fusion")
         pass_man.add("inline")
         pass_man.add("func.func(affine-parallelize)")
+        pass_man.add("convert-math-to-libm")
         pass_man.add("builtin.module(func.func(gpu-map-parallel-loops,convert-parallel-loops-to-gpu))")
         pass_man.add("lower-affine")
         pass_man.add("scf-parallel-loop-fusion")
@@ -132,16 +133,16 @@ class GPUBackend(_Backend):
         return super().jit_compile_(llmod, input_types, output_types, function_name, exec_engine=execution_engine.ExecutionEngine(llmod, opt_level=3, shared_libs=cuda_shared_libs))
 
 
-gpu_compiler = Compiler(ConditionalExtendGraphtoRVSDG, GPUBackend(), MyCostModel(), True)
-
-@ufunc_vectorize(input_type=Float64, shape=(10, 10), ufunc_compiler=gpu_compiler)
-def foo(a, b, c):
-    x = a + 1.0
-    y = b - 2.0
-    z = c + 3.0
-    return x + y + z
-
 if __name__ == "__main__":
+    gpu_compiler = Compiler(ConditionalExtendGraphtoRVSDG, GPUBackend(), MyCostModel(), True)
+
+    @ufunc_vectorize(input_type=Float64, shape=(10, 10), ufunc_compiler=gpu_compiler)
+    def foo(a, b, c):
+        x = a + 1.0
+        y = b - 2.0
+        z = c + 3.0
+        return x + y + z
+
     # Create NumPy arrays 
     ary = np.arange(100, dtype=np.float64).reshape(10, 10)
     ary_2 = np.arange(100, dtype=np.float64).reshape(10, 10)

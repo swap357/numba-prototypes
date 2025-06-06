@@ -70,9 +70,11 @@ from ch05_typeinfer_array import (
 )
 from ch06_mlir_backend import LowerStates, run_test
 from ch07_mlir_ufunc import ufunc_vectorize, Float32, Backend as UfuncBackend, TypeFloat32
+from ch08_gpu_offload import GPUBackend
+import mlir.dialects.arith as arith
+import mlir.dialects.math as math
 
 # ## The GELU function
-
 
 def gelu_tanh_forward(a):
     dt = np.float32
@@ -362,9 +364,6 @@ class Backend(UfuncBackend):
         return super().get_mlir_type(seal_ty)
 
     def lower_expr(self, expr: SExpr, state: LowerStates):
-        import mlir.dialects.arith as arith
-        import mlir.dialects.math as math
-
         match expr:
             case NbOp_Add_Float32(lhs, rhs):
                 lhs = yield lhs
@@ -506,6 +505,17 @@ if __name__ == "__main__":
 
 if __name__ == "__main__":
     vectorized_gelu = ufunc_vectorize(input_type=Float32, shape=(10,), ufunc_compiler=compiler, extra_ruleset=additional_rules)(gelu_tanh_forward)
+    relclose = lambda x, y: np.allclose(x, y, rtol=1e-6)
+    input_val = np.array([0.234]*10, dtype=np.float32)
+    run_test(gelu_tanh_forward, vectorized_gelu, (input_val,), equal=relclose)
+
+if __name__ == "__main__":
+    class Backend2(Backend, GPUBackend):
+        pass
+    
+    gpu_compiler = Compiler(ExtendEGraphToRVSDG, Backend2(), MyCostModel(), True)
+
+    vectorized_gelu = ufunc_vectorize(input_type=Float32, shape=(10,), ufunc_compiler=gpu_compiler, extra_ruleset=additional_rules)(gelu_tanh_forward)
     relclose = lambda x, y: np.allclose(x, y, rtol=1e-6)
     input_val = np.array([0.234]*10, dtype=np.float32)
     run_test(gelu_tanh_forward, vectorized_gelu, (input_val,), equal=relclose)
