@@ -126,11 +126,25 @@ class CallGraphVisitor(ast.NodeVisitor):
         """Update the calls for a function or register a global call."""
         # Flatten the name of the call from ast.Attribute or ast.Name
         call_qname = attribute_to_qualified_name(node)
-        class_name = self.class_stack[-1] if self.class_stack else None
-        if call_qname.startswith("self"):
-            # If the call starts with "self", it is a method call, we replace
-            # the "self" with the current class name to qualify it.
-            call_qname = class_name + call_qname[4:]
+        # Get the current class name, if we are visiting a class and have a
+        # method.
+        class_name, method_name = (self.class_stack[-1], self.namespace_stack[-1]
+                                   if self.class_stack and self.namespace_stack
+                                   else None, None)
+        # Get the name of the first paramater (usually 'self') of the method
+        # call using symtable module. If we are in a class, we assume this is a
+        # method call indeed.  TODO: account for @staticmethod and
+        # @classmethod.
+        first_param_name = (self.symt.
+                            lookup(class_name).get_namespace().
+                            lookup(method_name).get_namespace().
+                            get_parameters()[0]
+                            if class_name and method_name else None)
+        if first_param_name and call_qname.startswith(first_param_name):
+            # If the call starts with "self" or it's equivalent as determiend
+            # above, we replace # the "self" with the current class name to
+            # qualify it.
+            call_qname = class_name + call_qname[len(first_param_name):]
         if class_name and call_qname.startswith(class_name):
             # Replace calls from class attributes with their qualified name.
             # First split the qualified name by the dot separator.
