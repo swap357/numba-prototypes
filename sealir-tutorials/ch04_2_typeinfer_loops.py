@@ -66,7 +66,7 @@ from ch04_1_typeinfer_ifelse import (
 )
 from ch04_1_typeinfer_ifelse import base_ruleset as _ch4_1_base_ruleset
 from ch04_1_typeinfer_ifelse import (
-    compiler_pipeline,
+    Compiler,
     ruleset_failed_to_unify,
     ruleset_type_infer_failure_report,
     ruleset_type_infer_float,
@@ -289,17 +289,16 @@ def example_1(init, n):
     return c
 
 
+compiler = Compiler(ExtendEGraphToRVSDG, Backend(), MyCostModel(), True)
+
 if __name__ == "__main__":
-    jt = compiler_pipeline(
+    llvm_module, func_egraph = compiler.lower_py_fn(
         example_1,
         argtypes=(Int64, Int64),
         ruleset=base_ruleset | setup_argtypes(TypeInt64, TypeInt64),
-        verbose=True,
-        converter_class=ExtendEGraphToRVSDG,
-        cost_model=MyCostModel(),
-        backend=Backend(),
     )
-    run_test(example_1, jt, (10, 7), verbose=True)
+    jit_func = compiler.compile_module(llvm_module, func_egraph)
+    run_test(example_1, jit_func, (10, 7), verbose=True)
 
 
 # ## Example 2: Nested Loop example
@@ -318,13 +317,10 @@ def example_2(init, n):
 
 
 if __name__ == "__main__":
-    jt = compiler_pipeline(
+    llvm_module, func_egraph = compiler.lower_py_fn(
         example_2,
         argtypes=(Int64, Int64),
         ruleset=base_ruleset | setup_argtypes(TypeInt64, TypeInt64),
-        verbose=True,
-        converter_class=ExtendEGraphToRVSDG,
-        cost_model=MyCostModel(),
-        backend=Backend(),
     )
-    run_test(example_2, jt, (10, 7), verbose=True)
+    jit_func = compiler.compile_module(llvm_module, func_egraph)
+    run_test(example_2, jit_func, (10, 7), verbose=True)

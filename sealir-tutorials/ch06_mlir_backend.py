@@ -27,12 +27,17 @@ import mlir.dialects.arith as arith
 import mlir.dialects.cf as cf
 import mlir.dialects.func as func
 import mlir.dialects.scf as scf
+import mlir.runtime as runtime
 import mlir.execution_engine as execution_engine
+import mlir.runtime as runtime
+
 import mlir.ir as ir
 import mlir.passmanager as passmanager
+import numba.cuda
 from sealir import ase
 from sealir.rvsdg import grammar as rg
 from sealir.rvsdg import internal_prefix
+import numpy as np
 
 from ch03_egraph_program_rewrites import (
     run_test,
@@ -60,7 +65,7 @@ from ch04_1_typeinfer_ifelse import (
 )
 from ch04_1_typeinfer_ifelse import base_ruleset as if_else_ruleset
 from ch04_1_typeinfer_ifelse import (
-    compiler_pipeline,
+    Compiler,
     ruleset_type_infer_float,
     setup_argtypes,
 )
@@ -73,6 +78,7 @@ from ch04_2_typeinfer_loops import (
 from ch04_2_typeinfer_loops import base_ruleset as loop_ruleset
 from utils import IN_NOTEBOOK
 
+_DEBUG = False
 
 @dataclass(frozen=True)
 class LowerStates(ase.TraverseState):
@@ -88,6 +94,7 @@ function_name = "func"
 class Backend:
     def __init__(self):
         self.context = context = ir.Context()
+        self.f32 = ir.F32Type.get(context=context)
         self.f64 = ir.F64Type.get(context=context)
         self.i32 = ir.IntegerType.get_signless(32, context=context)
         self.i64 = ir.IntegerType.get_signless(64, context=context)
@@ -96,15 +103,12 @@ class Backend:
     def lower_type(self, ty: NbOp_Type):
         match ty:
             case NbOp_Type("Int64"):
-                return ir.IntType(64)
-        raise NotImplementedError(f"unknown type: {ty}")
-
-    def get_mlir_type(self, seal_ty):
-        match seal_ty.name:
-            case "Int64":
                 return self.i64
-            case "Float64":
+            case NbOp_Type("Float64"):
                 return self.f64
+            case NbOp_Type("Float32"):
+                return self.f32
+        raise NotImplementedError(f"unknown type: {ty}")
 
     def lower(self, root: rg.Func, argtypes):
         context = self.context
@@ -113,11 +117,11 @@ class Backend:
 
         # Get the module body pointer so we can insert content into the
         # module.
-        module_body = ir.InsertionPoint(module.body)
+        self.module_body = module_body =  ir.InsertionPoint(module.body)
         # Convert SealIR types to MLIR types.
-        input_types = tuple([self.get_mlir_type(x) for x in argtypes])
+        input_types = tuple([self.lower_type(x) for x in argtypes])
         output_types = (
-            self.get_mlir_type(
+            self.lower_type(
                 Attributes(root.body.begin.attrs).get_return_type(root.body)
             ),
         )
@@ -171,13 +175,24 @@ class Backend:
         with context, loc, constant_entry:
             cf.br([], fun.body.blocks[1])
 
-        module.dump()
-        return self.run_passes(module, context)
+        return module
 
-    def run_passes(self, module, context):
-        pass_man = passmanager.PassManager(context=context)
+    def run_passes(self, module):
+        module.dump()
+
+        if _DEBUG:
+            module.context.enable_multithreading(False)
+        if _DEBUG:
+            pass_man.enable_ir_printing()
+
+        pass_man = passmanager.PassManager(context=module.context)           
+        pass_man.add("convert-linalg-to-loops")
         pass_man.add("convert-scf-to-cf")
+        pass_man.add("finalize-memref-to-llvm")
+        pass_man.add("convert-math-to-libm")
         pass_man.add("convert-func-to-llvm")
+        pass_man.add("convert-index-to-llvm")
+        pass_man.add("reconcile-unrealized-casts")
         pass_man.enable_verifier(True)
         pass_man.run(module.operation)
         # Output LLVM-dialect MLIR
@@ -381,46 +396,36 @@ class Backend:
             case _:
                 raise NotImplementedError(expr, type(expr))
 
-    def jit_compile(self, llmod, func_node: rg.Func):
+    def jit_compile(self, llmod, func_node: rg.Func, func_name="func"):
         attributes = Attributes(func_node.body.begin.attrs)
         # Convert SealIR types into MLIR types
-        input_types = tuple(
-            [self.get_mlir_type(x) for x in attributes.input_types()]
-        )
+        with self.loc:
+            input_types = tuple(
+                [self.lower_type(x) for x in attributes.input_types()]
+            )
 
         output_types = (
-            self.get_mlir_type(
+            self.lower_type(
                 Attributes(func_node.body.begin.attrs).get_return_type(
                     func_node.body
                 )
             ),
         )
-        # Converts the MLIR module into a JIT-callable function.
-        return JitCallable.from_pointer(llmod, input_types, output_types)
-
-
-def get_exec_ptr(mlir_ty, val):
-    if isinstance(mlir_ty, ir.IntegerType):
-        return ctypes.pointer(ctypes.c_int64(val))
-    elif isinstance(mlir_ty, ir.F32Type):
-        return ctypes.pointer(ctypes.c_float(val))
-    elif isinstance(mlir_ty, ir.F64Type):
-        return ctypes.pointer(ctypes.c_double(val))
-
-
-@dataclass(frozen=True)
-class JitCallable:
-    jit_func: Callable
+        return self.jit_compile_(llmod, input_types, output_types)
 
     @classmethod
-    def from_pointer(cls, jit_module, input_types, output_types):
+    def jit_compile_(cls, llmod, input_types, output_types, function_name="func", exec_engine=None, **execution_engine_params):
+        # Converts the MLIR module into a JIT-callable function.
         # Use MLIR's own internal execution engine
-        engine = execution_engine.ExecutionEngine(jit_module)
-
+        if exec_engine is None:
+            engine = execution_engine.ExecutionEngine(llmod, **execution_engine_params)
+        else:
+            engine = exec_engine
+    
         assert (
             len(output_types) == 1
         ), "Execution of functions with output arguments > 1 not supported"
-        res_ptr = get_exec_ptr(output_types[0], 0)
+        res_ptr, res_val = cls.get_exec_ptr(output_types[0], None)
 
         # Build a wrapper function
         def jit_func(*input_args):
@@ -434,7 +439,7 @@ class JitCallable:
             # the internal execution engine should
             # be C-Type pointers.
             input_exec_ptrs = [
-                get_exec_ptr(ty, val)
+                cls.get_exec_ptr(ty, val)[0]
                 for ty, val in zip(input_types, input_args)
             ]
             # Invokes the function that we built, internally calls
@@ -443,13 +448,39 @@ class JitCallable:
             # appended to the end of all input pointers in the invoke call.
             engine.invoke(function_name, *input_exec_ptrs, res_ptr)
 
+            return cls.get_out_val(res_ptr, res_val)
+
+        return jit_func
+
+    @classmethod
+    def get_exec_ptr(cls, mlir_ty, val):
+        if isinstance(mlir_ty, ir.IntegerType):
+            val = 0 if val is None else val
+            ptr = ctypes.pointer(ctypes.c_int64(val))
+        elif isinstance(mlir_ty, ir.F32Type):
+            val = 0.0 if val is None else val
+            ptr = ctypes.pointer(ctypes.c_float(val))
+        elif isinstance(mlir_ty, ir.F64Type):
+            val = 0.0 if val is None else val
+            ptr = ctypes.pointer(ctypes.c_double(val))
+        elif isinstance(mlir_ty, ir.MemRefType):
+            if isinstance(mlir_ty.element_type, ir.F64Type):
+                np_dtype = np.float64
+            elif isinstance(mlir_ty.element_type, ir.F32Type):
+                np_dtype = np.float32
+            else:
+                raise TypeError("The current array element type is not supported")
+            val = np.zeros(mlir_ty.shape, dtype=np_dtype) if val is None else val
+            ptr = ctypes.pointer(ctypes.pointer(runtime.get_ranked_memref_descriptor(val)))
+
+        return ptr, val
+    
+    @classmethod
+    def get_out_val(cls, res_ptr, res_val):
+        if isinstance(res_val, np.ndarray):
+            return res_val
+        else:
             return res_ptr.contents.value
-
-        return cls(jit_func)
-
-    def __call__(self, *args: Any) -> Any:
-        return self.jit_func(*args)
-
 
 # + [markdown] jp-MarkdownHeadingCollapsed=true
 # Example 1: simple if-else
@@ -463,21 +494,20 @@ def example_1(a, b):
         z = b - a
     return z + a
 
+compiler = Compiler(ConditionalExtendGraphtoRVSDG, Backend(), MyCostModel(), True)
 
 if __name__ == "__main__":
-    jt = compiler_pipeline(
+    llvm_module, func_egraph = compiler.lower_py_fn(
         example_1,
         argtypes=(Int64, Int64),
         ruleset=(if_else_ruleset | setup_argtypes(TypeInt64, TypeInt64)),
-        verbose=True,
-        converter_class=ConditionalExtendGraphtoRVSDG,
-        cost_model=MyCostModel(),
-        backend=Backend(),
     )
+    compiler.run_backend_passes(llvm_module)
+    jit_func = compiler.compile_module(llvm_module, func_egraph)
     args = (10, 33)
-    run_test(example_1, jt, args, verbose=True)
+    run_test(example_1, jit_func, args, verbose=True)
     args = (7, 3)
-    run_test(example_1, jt, args, verbose=True)
+    run_test(example_1, jit_func, args, verbose=True)
 
 
 # ## Example 2: add `float()`
@@ -495,7 +525,7 @@ def example_2(a, b):
 
 
 if __name__ == "__main__":
-    jt = compiler_pipeline(
+    llvm_module, func_egraph = compiler.lower_py_fn(
         example_2,
         argtypes=(Int64, Int64),
         ruleset=(
@@ -503,15 +533,13 @@ if __name__ == "__main__":
             | setup_argtypes(TypeInt64, TypeInt64)
             | ruleset_type_infer_float  # < --- added for float()
         ),
-        verbose=True,
-        converter_class=ConditionalExtendGraphtoRVSDG,
-        cost_model=MyCostModel(),
-        backend=Backend(),
     )
+    compiler.run_backend_passes(llvm_module)
+    jit_func = compiler.compile_module(llvm_module, func_egraph)
     args = (10, 33)
-    run_test(example_2, jt, args, verbose=True)
+    run_test(example_2, jit_func, args, verbose=True)
     args = (7, 3)
-    run_test(example_2, jt, args, verbose=True)
+    run_test(example_2, jit_func, args, verbose=True)
 
 # ## Example 3: Simple while loop example
 
@@ -524,18 +552,18 @@ def example_3(init, n):
         i = i + 1
     return c
 
+compiler = Compiler(LoopExtendEGraphToRVSDG, Backend(), MyCostModel(), True)
 
 if __name__ == "__main__":
-    jt = compiler_pipeline(
+    llvm_module, func_egraph = compiler.lower_py_fn(
         example_3,
         argtypes=(Int64, Int64),
         ruleset=loop_ruleset | setup_argtypes(TypeInt64, TypeInt64),
-        verbose=True,
-        converter_class=LoopExtendEGraphToRVSDG,
-        cost_model=MyCostModel(),
-        backend=Backend(),
     )
-    run_test(example_3, jt, (10, 7), verbose=True)
+    compiler.run_backend_passes(llvm_module)
+    jit_func = compiler.compile_module(llvm_module, func_egraph)
+
+    run_test(example_3, jit_func, (10, 7), verbose=True)
 
 
 # ## Example 4: Nested Loop example
@@ -554,13 +582,12 @@ def example_4(init, n):
 
 
 if __name__ == "__main__":
-    jt = compiler_pipeline(
+    llvm_module, func_egraph = compiler.lower_py_fn(
         example_4,
         argtypes=(Int64, Int64),
         ruleset=loop_ruleset | setup_argtypes(TypeInt64, TypeInt64),
-        verbose=True,
-        converter_class=LoopExtendEGraphToRVSDG,
-        cost_model=MyCostModel(),
-        backend=Backend(),
     )
-    run_test(example_4, jt, (10, 7), verbose=True)
+    compiler.run_backend_passes(llvm_module)
+    jit_func = compiler.compile_module(llvm_module, func_egraph)
+
+    run_test(example_4, jit_func, (10, 7), verbose=True)
