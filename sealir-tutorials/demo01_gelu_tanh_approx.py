@@ -385,7 +385,7 @@ class Backend(UfuncBackend):
                 return arith.sitofp(self.f32, val)
             case NpyOp_Tanh_Float32(val):
                 val = yield val
-                return arith.divf(math.sinh(val), math.cosh(val))
+                return math.tanh(val)
             case NpyOp_Sqrt_Float32(val):
                 val = yield val
                 return math.sqrt(val)
@@ -433,7 +433,6 @@ if __name__ == "__main__":
     compiler.run_backend_passes(llvm_module)
     jit_func = compiler.compile_module(llvm_module, func_egraph)
     run_test(gelu_tanh_forward, jit_func, (0.234,), verbose=True)
-
 
 # ## Add rules to optimize
 

@@ -123,7 +123,7 @@ def ufunc_vectorize(input_type, shape, ufunc_compiler, extra_ruleset=None):
                 ] * (num_inputs + 1))
                 iterators = ir.ArrayAttr.get([
                     ir.Attribute.parse(f"#linalg.iterator_type<parallel>")
-                ] * (1 + 1))
+                ] * (num_inputs))
                 matmul = linalg.GenericOp(
                     result_tensors=[],
                     inputs=arys,

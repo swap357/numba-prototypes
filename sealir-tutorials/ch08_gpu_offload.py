@@ -79,6 +79,7 @@ class GPUBackend(_Backend):
         pass_man.add('gpu-lower-to-nvvm-pipeline{cubin-format="fatbin"}')
         pass_man.add("convert-scf-to-cf")
         pass_man.add("finalize-memref-to-llvm")
+        pass_man.add("convert-math-to-libm")
         pass_man.add("convert-func-to-llvm")
         pass_man.add("convert-index-to-llvm")
         pass_man.add("convert-bufferization-to-memref")
