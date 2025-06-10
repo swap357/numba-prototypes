@@ -146,7 +146,7 @@ class CallGraphVisitor(ast.NodeVisitor):
                             lookup(method_name).get_namespace().
                             get_parameters()[0]
                             if class_name and method_name else None)
-        if first_param_name and call_qname.startswith(first_param_name):
+        if first_param_name and call_qname.split(".")[0] == first_param_name:
             # If the call starts with "self" or it's equivalent as determiend
             # above, we replace # the "self" with the current class name to
             # qualify it.
