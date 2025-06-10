@@ -30,7 +30,7 @@
 # * [Demo 1 - GELU tanh approximation](demo01_gelu_tanh_approx.html)
 # * Chapter 7 - MLIR Backend for Array Functions
 # * Chapter 8 - MLIR Backend for Array Offload to the GPU
-# * Chapter 9 - Whole Program Compiler Driver
+# * [Chapter 9 - Whole Program Compiler Driver](ch09_whole_program_compiler_driver.html)
 # * Chapter 10 - Tensor Graph Extraction
 # * Chapter 11 - Tensor Optimization
 # * Chapter 12 - Implementing Alternative GEMMS
