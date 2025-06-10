@@ -62,6 +62,8 @@ import sys
 from collections import defaultdict
 from dataclasses import dataclass
 
+import IPython
+
 from utils import IN_NOTEBOOK
 
 
@@ -344,7 +346,7 @@ if __name__ == "__main__":
 # must assume that these will be resolved at a later stage.
 
 if IN_NOTEBOOK:
-    to_graphviz(cgv)
+    IPython.display.display(to_graphviz(cgv))
 
 
 
