@@ -315,13 +315,7 @@ def main(args):
 # As you can see we print out the symbol table and the global calls.
 
 if __name__ == "__main__":
-    try:
-        from IPython import get_ipython
-        if 'IPKernelApp' in get_ipython().config:
-            in_jupyter = True
-    except:
-        in_jupyter = False
-    if in_jupyter:
+    if IN_NOTEBOOK:
         # Jupyter based example.
         cgv = main(["wpc.py", "llm.py"])
     else:
