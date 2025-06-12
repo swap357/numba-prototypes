@@ -45,7 +45,7 @@ def test_ch04_1_example_3():
                 | setup_argtypes(TypeInt64, TypeInt64)
                 | ruleset_type_infer_float
                 | ruleset_failed_to_unify
-            )
+            ),
         )
     except CompilationError as e:
         # Compilation failed because the return type cannot be determined.

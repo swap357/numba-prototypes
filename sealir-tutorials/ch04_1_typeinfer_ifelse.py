@@ -499,7 +499,7 @@ class Compiler:
         return rvsdg_expr, dbginfo
 
     def run_middle_end(self, rvsdg_expr, ruleset):
-        
+
         # Middle end
         def define_egraph(
             egraph: EGraph,
@@ -542,14 +542,14 @@ class Compiler:
             )
         except ExtractionError as e:
             raise CompilationError("extraction failed") from e
-        
+
         return cost, extracted
 
     def run_backend(self, extracted, argtypes):
         return self.backend.lower(extracted, argtypes)
 
     def lower_py_fn(self, fn, argtypes, ruleset):
-        
+
         rvsdg_expr, dbginfo = self.run_frontend(fn)
 
         print("Before EGraph".center(80, "="))
@@ -575,8 +575,24 @@ class Compiler:
     def compile_module(self, module, egraph_node, func_name="func"):
         return self.backend.jit_compile(module, egraph_node, func_name)
 
-    def compile_module_(self, llmod, input_types, output_types, function_name="func", exec_engine=None, **execution_engine_params):
-        return self.backend.jit_compile_(llmod, input_types, output_types, function_name, exec_engine, **execution_engine_params)
+    def compile_module_(
+        self,
+        llmod,
+        input_types,
+        output_types,
+        function_name="func",
+        exec_engine=None,
+        **execution_engine_params,
+    ):
+        return self.backend.jit_compile_(
+            llmod,
+            input_types,
+            output_types,
+            function_name,
+            exec_engine,
+            **execution_engine_params,
+        )
+
 
 # + [markdown] jp-MarkdownHeadingCollapsed=true
 # ### Define EGraph functions for new operations:
@@ -1286,7 +1302,7 @@ class Backend:
             case ir.DoubleType():
                 return ctypes.c_double
         raise NotImplementedError(lltype)
-    
+
     def run_passes(self, module, passes):
         pass
 
@@ -1341,7 +1357,9 @@ def example_1(a, b):
     return z + a
 
 
-compiler = Compiler(ExtendEGraphToRVSDG, Backend(), MyCostModel(), verbose=True)
+compiler = Compiler(
+    ExtendEGraphToRVSDG, Backend(), MyCostModel(), verbose=True
+)
 
 if __name__ == "__main__":
     llvm_module, func_egraph = compiler.lower_py_fn(
@@ -1447,7 +1465,7 @@ if __name__ == "__main__":
                 | setup_argtypes(TypeInt64, TypeInt64)
                 | ruleset_type_infer_float
                 | ruleset_failed_to_unify
-            )
+            ),
         )
     except CompilationError as e:
         # Compilation failed because the return type cannot be determined.

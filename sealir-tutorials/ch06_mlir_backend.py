@@ -27,23 +27,22 @@ import mlir.dialects.arith as arith
 import mlir.dialects.cf as cf
 import mlir.dialects.func as func
 import mlir.dialects.scf as scf
-import mlir.runtime as runtime
 import mlir.execution_engine as execution_engine
-import mlir.runtime as runtime
-
 import mlir.ir as ir
 import mlir.passmanager as passmanager
+import mlir.runtime as runtime
 import numba.cuda
+import numpy as np
 from sealir import ase
 from sealir.rvsdg import grammar as rg
 from sealir.rvsdg import internal_prefix
-import numpy as np
 
 from ch03_egraph_program_rewrites import (
     run_test,
 )
 from ch04_1_typeinfer_ifelse import (
     Attributes,
+    Compiler,
 )
 from ch04_1_typeinfer_ifelse import (
     ExtendEGraphToRVSDG as ConditionalExtendGraphtoRVSDG,
@@ -65,7 +64,6 @@ from ch04_1_typeinfer_ifelse import (
 )
 from ch04_1_typeinfer_ifelse import base_ruleset as if_else_ruleset
 from ch04_1_typeinfer_ifelse import (
-    Compiler,
     ruleset_type_infer_float,
     setup_argtypes,
 )
@@ -79,6 +77,7 @@ from ch04_2_typeinfer_loops import base_ruleset as loop_ruleset
 from utils import IN_NOTEBOOK
 
 _DEBUG = False
+
 
 @dataclass(frozen=True)
 class LowerStates(ase.TraverseState):
@@ -117,7 +116,7 @@ class Backend:
 
         # Get the module body pointer so we can insert content into the
         # module.
-        self.module_body = module_body =  ir.InsertionPoint(module.body)
+        self.module_body = module_body = ir.InsertionPoint(module.body)
         # Convert SealIR types to MLIR types.
         input_types = tuple([self.lower_type(x) for x in argtypes])
         output_types = (
@@ -185,7 +184,7 @@ class Backend:
         if _DEBUG:
             pass_man.enable_ir_printing()
 
-        pass_man = passmanager.PassManager(context=module.context)           
+        pass_man = passmanager.PassManager(context=module.context)
         pass_man.add("convert-linalg-to-loops")
         pass_man.add("convert-scf-to-cf")
         pass_man.add("finalize-memref-to-llvm")
@@ -414,14 +413,24 @@ class Backend:
         return self.jit_compile_(llmod, input_types, output_types)
 
     @classmethod
-    def jit_compile_(cls, llmod, input_types, output_types, function_name="func", exec_engine=None, **execution_engine_params):
+    def jit_compile_(
+        cls,
+        llmod,
+        input_types,
+        output_types,
+        function_name="func",
+        exec_engine=None,
+        **execution_engine_params,
+    ):
         # Converts the MLIR module into a JIT-callable function.
         # Use MLIR's own internal execution engine
         if exec_engine is None:
-            engine = execution_engine.ExecutionEngine(llmod, **execution_engine_params)
+            engine = execution_engine.ExecutionEngine(
+                llmod, **execution_engine_params
+            )
         else:
             engine = exec_engine
-    
+
         assert (
             len(output_types) == 1
         ), "Execution of functions with output arguments > 1 not supported"
@@ -469,18 +478,25 @@ class Backend:
             elif isinstance(mlir_ty.element_type, ir.F32Type):
                 np_dtype = np.float32
             else:
-                raise TypeError("The current array element type is not supported")
-            val = np.zeros(mlir_ty.shape, dtype=np_dtype) if val is None else val
-            ptr = ctypes.pointer(ctypes.pointer(runtime.get_ranked_memref_descriptor(val)))
+                raise TypeError(
+                    "The current array element type is not supported"
+                )
+            val = (
+                np.zeros(mlir_ty.shape, dtype=np_dtype) if val is None else val
+            )
+            ptr = ctypes.pointer(
+                ctypes.pointer(runtime.get_ranked_memref_descriptor(val))
+            )
 
         return ptr, val
-    
+
     @classmethod
     def get_out_val(cls, res_ptr, res_val):
         if isinstance(res_val, np.ndarray):
             return res_val
         else:
             return res_ptr.contents.value
+
 
 # + [markdown] jp-MarkdownHeadingCollapsed=true
 # Example 1: simple if-else
@@ -494,7 +510,10 @@ def example_1(a, b):
         z = b - a
     return z + a
 
-compiler = Compiler(ConditionalExtendGraphtoRVSDG, Backend(), MyCostModel(), True)
+
+compiler = Compiler(
+    ConditionalExtendGraphtoRVSDG, Backend(), MyCostModel(), True
+)
 
 if __name__ == "__main__":
     llvm_module, func_egraph = compiler.lower_py_fn(
@@ -551,6 +570,7 @@ def example_3(init, n):
         c = c + float(i)
         i = i + 1
     return c
+
 
 compiler = Compiler(LoopExtendEGraphToRVSDG, Backend(), MyCostModel(), True)
 

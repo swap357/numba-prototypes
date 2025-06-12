@@ -1,9 +1,11 @@
 import numpy as np
 
+
 def softmax(x, axis=-1):
     """Compute softmax values for each sets of scores in x."""
     e_x = np.exp(x - np.max(x, axis=axis, keepdims=True))
     return e_x / np.sum(e_x, axis=axis, keepdims=True)
+
 
 def scaled_dot_product_attention(query, key, value):
     """
@@ -32,6 +34,7 @@ def scaled_dot_product_attention(query, key, value):
     context = np.matmul(weights, V)
 
     return context.reshape(query.shape), weights
+
 
 class MultiHeadAttention:
     def __init__(self, num_heads=8, embedding_dim=128):
@@ -64,6 +67,7 @@ class MultiHeadAttention:
         # Combine heads
         return self.combine_heads(context), weights
 
+
 class FeedForwardNetwork:
     def __init__(self, embedding_dim=128, hidden_dim=256):
         self.W1 = np.random.randn(embedding_dim, hidden_dim)
@@ -71,6 +75,7 @@ class FeedForwardNetwork:
 
     def forward(self, x):
         return np.matmul(np.maximum(np.matmul(x, self.W1), 0), self.W2)
+
 
 class TransformerLayer:
 
@@ -90,6 +95,7 @@ class TransformerLayer:
         ff_output = self.feed_forward.forward(attn_output + x)
 
         return ff_output
+
 
 # Example usage
 np.random.seed(42)

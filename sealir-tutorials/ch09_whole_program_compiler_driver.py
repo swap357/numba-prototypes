@@ -66,14 +66,15 @@ import IPython
 
 from utils import IN_NOTEBOOK
 
-
 # ### Symbol Information class
+
 
 @dataclass
 class SymbolInfo:
     name: str
     ast: ast.AST
     calls: list
+
 
 # ### Call Graph Visitor class
 #
@@ -92,6 +93,7 @@ class SymbolInfo:
 #
 # Lastly, the function `get_call_graph` returns the call graph.
 
+
 class CallGraphVisitor(ast.NodeVisitor):
 
     def __init__(self, source_code, file_name):
@@ -101,10 +103,15 @@ class CallGraphVisitor(ast.NodeVisitor):
         # Get the AST once
         self.tree = ast.parse(source_code)
         # Initialize the cpython symtable
-        self.symt = symtable.symtable(source_code, file_name , "exec")
+        self.symt = symtable.symtable(source_code, file_name, "exec")
         # Filter out all class definitions from the AST
-        self.classes = set((node.name for node in ast.walk(self.tree) if
-                        isinstance(node, ast.ClassDef)))
+        self.classes = set(
+            (
+                node.name
+                for node in ast.walk(self.tree)
+                if isinstance(node, ast.ClassDef)
+            )
+        )
         # Setup the namespace and class stacks
         self.namespace_stack = []
         self.class_stack = []
@@ -116,15 +123,16 @@ class CallGraphVisitor(ast.NodeVisitor):
         # List of all global ast.Call nodes
         self.global_calls = []
 
-    def get_call_graph(self) -> dict[str: tuple[str]]:
+    def get_call_graph(self) -> dict[str : tuple[str]]:
         """Obtain a call graph suitable for processing with networkx.
 
         Returns a dictionary mapping function names as strings to lists of
         function names as strings.
         """
 
-        return {k:tuple(c[1] for c in v.calls) for k,v in self.functions.items()}
-
+        return {
+            k: tuple(c[1] for c in v.calls) for k, v in self.functions.items()
+        }
 
     def update_calls(self, node):
         """Update the calls for a function or register a global call."""
@@ -132,25 +140,29 @@ class CallGraphVisitor(ast.NodeVisitor):
         call_qname = attribute_to_qualified_name(node)
         # Get the current class name, if we are visiting a class and have a
         # method.
-        class_name, method_name = ((None, None)
-                                   if not (self.class_stack
-                                           and self.namespace_stack)
-                                   else (self.class_stack[-1],
-                                         self.namespace_stack[-1]))
+        class_name, method_name = (
+            (None, None)
+            if not (self.class_stack and self.namespace_stack)
+            else (self.class_stack[-1], self.namespace_stack[-1])
+        )
         # Get the name of the first paramater (usually 'self') of the method
         # call using symtable module. If we are in a class, we assume this is a
         # method call indeed.  TODO: account for @staticmethod and
         # @classmethod.
-        first_param_name = (self.symt.
-                            lookup(class_name).get_namespace().
-                            lookup(method_name).get_namespace().
-                            get_parameters()[0]
-                            if class_name and method_name else None)
+        first_param_name = (
+            self.symt.lookup(class_name)
+            .get_namespace()
+            .lookup(method_name)
+            .get_namespace()
+            .get_parameters()[0]
+            if class_name and method_name
+            else None
+        )
         if first_param_name and call_qname.split(".")[0] == first_param_name:
             # If the call starts with "self" or it's equivalent as determiend
             # above, we replace # the "self" with the current class name to
             # qualify it.
-            call_qname = class_name + call_qname[len(first_param_name):]
+            call_qname = class_name + call_qname[len(first_param_name) :]
         if class_name and call_qname.startswith(class_name):
             # Replace calls from class attributes with their qualified name.
             # First split the qualified name by the dot separator.
@@ -161,8 +173,9 @@ class CallGraphVisitor(ast.NodeVisitor):
             # the class attribute, replace the reference to the class.attribute
             # string with the correct type.
             if split_qname[1] in current_class_types:
-                call_qname = ".".join([current_class_types[split_qname[1]]] +
-                                      split_qname[2:])
+                call_qname = ".".join(
+                    [current_class_types[split_qname[1]]] + split_qname[2:]
+                )
         if call_qname in self.classes:
             # If the call ends with the current class name, we replace it with
             # the constructor call, since this is the Python semantics.
@@ -229,7 +242,9 @@ class CallGraphVisitor(ast.NodeVisitor):
             # Populate the class_type datastructure
             self.class_types[class_name][attribute_name] = attribute_type
 
+
 # ### Utilities
+
 
 def attribute_to_qualified_name(node):
     """
@@ -252,7 +267,10 @@ def attribute_to_qualified_name(node):
     elif isinstance(node, ast.Call):
         return attribute_to_qualified_name(node.func)
     else:
-        raise TypeError(f"Expected ast.Attribute or ast.Name, got {type(node).__name__}")
+        raise TypeError(
+            f"Expected ast.Attribute or ast.Name, got {type(node).__name__}"
+        )
+
 
 def to_graphviz(cgv):
     # Convert the call graph in a CallGraphVisitor to a graphviz style graph
@@ -261,25 +279,31 @@ def to_graphviz(cgv):
 
     import networkx as nx
     from graphviz import Source
+
     # We use the interface "adjacency list" to create a networkx DiGraph
     # (directed graph).  Then convert that to a graphviz style graph for
     # visualization using various APIs.
 
-    return Source(nx.nx_agraph.to_agraph(nx.DiGraph(cgv.get_call_graph())).string())
+    return Source(
+        nx.nx_agraph.to_agraph(nx.DiGraph(cgv.get_call_graph())).string()
+    )
 
 
 # ### Main function, the command line interface.
 
+
 def main(args):
     """Entry point for the compiler driver."""
     if len(args) < 2:
-        print(f"Usage: python {os.path.basename(__file__)} <python_source_file>")
+        print(
+            f"Usage: python {os.path.basename(__file__)} <python_source_file>"
+        )
         sys.exit(1)
 
     source_file = args[1]
 
     try:
-        with open(source_file, 'r') as f:
+        with open(source_file, "r") as f:
             source_code = f.read()
     except FileNotFoundError:
         print(f"File not found: {source_file}")
@@ -303,6 +327,7 @@ def main(args):
     pprint.pp(cgv.get_call_graph())
     print("########## ------------ ##########")
     return cgv
+
 
 # ### Entrypoint and example
 #
@@ -341,6 +366,3 @@ if __name__ == "__main__":
 
 if IN_NOTEBOOK:
     IPython.display.display(to_graphviz(cgv))
-
-
-
