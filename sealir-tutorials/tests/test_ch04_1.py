@@ -4,15 +4,14 @@ from ch04_1_typeinfer_ifelse import *
 
 
 def test_ch04_1_example_1():
-    jt = compiler_pipeline(
+    llvm_module, func_egraph = compiler.lower_py_fn(
         example_1,
         argtypes=(Int64, Int64),
         ruleset=(base_ruleset | setup_argtypes(TypeInt64, TypeInt64)),
-        verbose=False,
-        converter_class=ExtendEGraphToRVSDG,
-        cost_model=MyCostModel(),
-        backend=Backend(),
     )
+
+    jt = compiler.compile_module(llvm_module, func_egraph)
+
     args = (10, 33)
     run_test(example_1, jt, args, verbose=False)
     args = (7, 3)
@@ -20,7 +19,7 @@ def test_ch04_1_example_1():
 
 
 def test_ch04_1_example_2():
-    jt = compiler_pipeline(
+    llvm_module, func_egraph = compiler.lower_py_fn(
         example_2,
         argtypes=(Int64, Int64),
         ruleset=(
@@ -28,11 +27,8 @@ def test_ch04_1_example_2():
             | setup_argtypes(TypeInt64, TypeInt64)
             | ruleset_type_infer_float  # < --- added for float()
         ),
-        verbose=False,
-        converter_class=ExtendEGraphToRVSDG,
-        cost_model=MyCostModel(),
-        backend=Backend(),
     )
+    jt = compiler.compile_module(llvm_module, func_egraph)
     args = (10, 33)
     run_test(example_2, jt, args, verbose=False)
     args = (7, 3)
@@ -41,7 +37,7 @@ def test_ch04_1_example_2():
 
 def test_ch04_1_example_3():
     try:
-        compiler_pipeline(
+        compiler.lower_py_fn(
             example_3,
             argtypes=(Int64, Int64),
             ruleset=(
@@ -49,11 +45,7 @@ def test_ch04_1_example_3():
                 | setup_argtypes(TypeInt64, TypeInt64)
                 | ruleset_type_infer_float
                 | ruleset_failed_to_unify
-            ),
-            verbose=False,
-            converter_class=ExtendEGraphToRVSDG,
-            cost_model=MyCostModel(),
-            backend=Backend(),
+            )
         )
     except CompilationError as e:
         # Compilation failed because the return type cannot be determined.
@@ -64,7 +56,7 @@ def test_ch04_1_example_3():
 
 def test_ch04_1_example_4():
     try:
-        compiler_pipeline(
+        compiler.lower_py_fn(
             example_3,
             argtypes=(Int64, Int64),
             ruleset=(
@@ -74,10 +66,6 @@ def test_ch04_1_example_4():
                 | ruleset_failed_to_unify
                 | ruleset_type_infer_failure_report
             ),
-            verbose=False,
-            converter_class=ExtendEGraphToRVSDG,
-            cost_model=MyCostModel(),
-            backend=Backend(),
         )
 
     except CompilationError as e:

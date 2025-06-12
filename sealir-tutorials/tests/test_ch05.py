@@ -4,7 +4,7 @@ from ch05_typeinfer_array import *
 
 
 def test_ch5_example_1():
-    jt = compiler_pipeline(
+    llvm_module, func_egraph = compiler.lower_py_fn(
         example_1,
         argtypes=(array_1d_symbolic, Int64),
         ruleset=(
@@ -13,11 +13,8 @@ def test_ch5_example_1():
             | ruleset(*array_infos)
             | ruleset_typeinfer_array_getitem
         ),
-        verbose=False,
-        converter_class=ExtendEGraphToRVSDG,
-        cost_model=MyCostModel(),
-        backend=Backend(),
     )
+    jt = compiler.compile_module(llvm_module, func_egraph)
     ary = np.arange(10, dtype=np.int64)
     param_ary = CtypeInt64Array1D()
     param_ary.ptr = ary.ctypes.data
@@ -29,7 +26,7 @@ def test_ch5_example_1():
 
 
 def test_ch5_example_2():
-    jt = compiler_pipeline(
+    llvm_module, func_egraph = compiler.lower_py_fn(
         example_2,
         argtypes=(array_1d_symbolic, Int64),
         ruleset=(
@@ -38,11 +35,9 @@ def test_ch5_example_2():
             | ruleset(*array_infos)
             | ruleset_typeinfer_array_getitem
         ),
-        verbose=False,
-        converter_class=ExtendEGraphToRVSDG,
-        cost_model=MyCostModel(),
-        backend=Backend(),
     )
+    jt = compiler.compile_module(llvm_module, func_egraph)
+
     ary = np.arange(10, dtype=np.int64)
     param_ary = CtypeInt64Array1D()
     param_ary.ptr = ary.ctypes.data
