@@ -24,8 +24,8 @@ from egglog import EGraph, Unit, function, i64, rewrite, rule, ruleset
 from sealir import rvsdg
 from sealir.eqsat import rvsdg_eqsat
 from sealir.eqsat.rvsdg_eqsat import GraphRoot, Term, TermList
-from egglog_to_latex import tokenize, parse_sexps, to_latex, sexp_to_string
 from utils import IN_NOTEBOOK
+from egglog_to_latex import visualize_ruleset_latex
 
 # We'll be extending from chapter 2.
 from ch02_egraph_basic import (
@@ -118,8 +118,11 @@ def ruleset_const_propagate(a: Term, ival: i64):
         IsConstantFalse(a)
     )
 
+if IN_NOTEBOOK:
+    # Visualize the constant propagation ruleset
+    visualize_ruleset_latex(ruleset_const_propagate)
 
-# Now, we’ll test our newly defined ruleset. This complete ruleset combines a
+# Now, we'll test our newly defined ruleset. This complete ruleset combines a
 # few built-in RVSDG rules with our recently crafted simple constant-propagation
 # rules.
 
@@ -175,6 +178,9 @@ def ruleset_const_fold_if_else(a: Term, b: Term, c: Term, operands: TermList):
         IsConstantFalse(a),
     )
 
+if IN_NOTEBOOK:
+    # Visualize the if-else folding ruleset
+    visualize_ruleset_latex(ruleset_const_fold_if_else)
 
 if __name__ == "__main__":
     my_ruleset = (
@@ -182,23 +188,6 @@ if __name__ == "__main__":
         | ruleset_const_propagate
         | ruleset_const_fold_if_else  # <-- the new rule for if-else
     )
-
-    # Visualize the ruleset structure
-    demo_egraph = EGraph(save_egglog_string=True)
-    demo_egraph.run(my_ruleset)
-    egglog_str = demo_egraph.as_egglog_string
-    tokens = tokenize(egglog_str)
-    sexps = parse_sexps(tokens)
-
-    if IN_NOTEBOOK:
-        from IPython.display import display, Math
-
-        for sexp in sexps:
-            tex = to_latex(sexp)
-            if tex:
-                print(sexp_to_string(sexp))
-                display(Math(tex))
-                print()
 
     jt = compiler_pipeline(ifelse_fold, verbose=True, ruleset=my_ruleset)
     run_test(ifelse_fold, jt, (12, 34))
