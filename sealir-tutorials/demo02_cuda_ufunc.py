@@ -1,6 +1,7 @@
 # # Demo 2: CUDA backend for Tanh Approximation for GELU activation layer
 #
 # (Depends on Ch.08)
+
 from ch08_gpu_offload import GPUBackend
 from demo01_gelu_tanh_approx import *
 
