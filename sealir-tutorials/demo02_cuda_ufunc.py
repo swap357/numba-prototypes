@@ -1,6 +1,8 @@
 # # Demo 2: CUDA backend for Tanh Approximation for GELU activation layer
 #
 # (Depends on Ch.08)
+# Requires the CUDA toolkit.
+# If using `conda install cuda`, set `CUDA_HOME=$CONDA_PREFIX`
 
 
 from ch08_gpu_offload import GPUBackend
