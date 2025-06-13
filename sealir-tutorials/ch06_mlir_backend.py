@@ -420,6 +420,7 @@ class Backend:
         output_types,
         function_name="func",
         exec_engine=None,
+        is_ufunc=False,
         **execution_engine_params,
     ):
         # Converts the MLIR module into a JIT-callable function.
@@ -434,10 +435,16 @@ class Backend:
         assert (
             len(output_types) == 1
         ), "Execution of functions with output arguments > 1 not supported"
-        res_ptr, res_val = cls.get_exec_ptr(output_types[0], None)
+        nout = len(output_types)
 
         # Build a wrapper function
-        def jit_func(*input_args):
+        def jit_func(*args):
+            if is_ufunc:
+                input_args = args[:-nout]
+                output_args = args[-nout:]
+            else:
+                input_args = args
+                output_args = [None]
             assert len(input_args) == len(input_types)
             for arg, arg_ty in zip(input_args, input_types):
                 # assert isinstance(arg, arg_ty)
@@ -455,6 +462,9 @@ class Backend:
             # _mlir_ciface_function_name as a void pointer with the given
             # input pointers, there can only be one resulting pointer
             # appended to the end of all input pointers in the invoke call.
+            res_ptr, res_val = cls.get_exec_ptr(
+                output_types[0], output_args[0]
+            )
             engine.invoke(function_name, *input_exec_ptrs, res_ptr)
 
             return cls.get_out_val(res_ptr, res_val)
@@ -481,9 +491,12 @@ class Backend:
                 raise TypeError(
                     "The current array element type is not supported"
                 )
-            val = (
-                np.zeros(mlir_ty.shape, dtype=np_dtype) if val is None else val
-            )
+
+            if val is None:
+                if not mlir_ty.has_static_shape:
+                    raise ValueError(f"{mlir_ty} does not have static shape")
+                val = np.zeros(mlir_ty.shape, dtype=np_dtype)
+
             ptr = ctypes.pointer(
                 ctypes.pointer(runtime.get_ranked_memref_descriptor(val))
             )

@@ -20,6 +20,7 @@
 from __future__ import annotations
 
 import ctypes
+import os
 from collections import namedtuple
 from ctypes.util import find_library
 
@@ -38,6 +39,12 @@ from ch05_typeinfer_array import NbOp_ArrayType
 from ch06_mlir_backend import Backend as _Backend
 from ch06_mlir_backend import ConditionalExtendGraphtoRVSDG, NbOp_Type
 from ch07_mlir_ufunc import Float64, ufunc_vectorize
+
+# Requires the CUDA toolkit.
+# If using `conda install cuda`, set `CUDA_HOME=$CONDA_PREFIX`
+if "CUDA_HOME" not in os.environ and "CONDA_PREFIX" in os.environ:
+    os.environ["CUDA_HOME"] = os.environ["CONDA_PREFIX"]
+
 
 _DEBUG = True
 
@@ -171,6 +178,7 @@ class GPUBackend(_Backend):
             exec_engine=execution_engine.ExecutionEngine(
                 llmod, opt_level=3, shared_libs=cuda_shared_libs
             ),
+            **execution_engine_params,
         )
 
 
@@ -179,9 +187,7 @@ if __name__ == "__main__":
         ConditionalExtendGraphtoRVSDG, GPUBackend(), MyCostModel(), True
     )
 
-    @ufunc_vectorize(
-        input_type=Float64, shape=(10, 10), ufunc_compiler=gpu_compiler
-    )
+    @ufunc_vectorize(input_type=Float64, ndim=2, ufunc_compiler=gpu_compiler)
     def foo(a, b, c):
         x = a + 1.0
         y = b - 2.0

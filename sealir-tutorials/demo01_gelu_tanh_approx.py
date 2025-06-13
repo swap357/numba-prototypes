@@ -511,7 +511,7 @@ if __name__ == "__main__":
 if __name__ == "__main__":
     vectorized_gelu = ufunc_vectorize(
         input_type=Float32,
-        shape=(100,),
+        ndim=1,
         ufunc_compiler=compiler,
         extra_ruleset=additional_rules,
     )(gelu_tanh_forward)

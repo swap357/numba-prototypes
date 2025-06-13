@@ -68,7 +68,7 @@ class Backend(_Backend):
 
 
 # Decorator function for vecotrization.
-def ufunc_vectorize(input_type, shape, ufunc_compiler, extra_ruleset=None):
+def ufunc_vectorize(input_type, ndim, ufunc_compiler, extra_ruleset=None):
     def to_input_dtypes(ty):
         if ty == Float64:
             return TypeFloat64
@@ -108,8 +108,8 @@ def ufunc_vectorize(input_type, shape, ufunc_compiler, extra_ruleset=None):
                 case _:
                     raise TypeError("The current input type is not supported")
 
-            ndim = len(shape)
-            memref_ty = ir.MemRefType.get(shape, internal_dtype)
+            dynsize = ir.ShapedType.get_dynamic_size()
+            memref_ty = ir.MemRefType.get([dynsize] * ndim, internal_dtype)
 
             # The function 'ufunc' has N + 1 number of arguments
             # (where N is the nuber of arguments for the original function)
@@ -168,9 +168,27 @@ def ufunc_vectorize(input_type, shape, ufunc_compiler, extra_ruleset=None):
         ufunc_compiler.run_backend_passes(llmod)
 
         jit_func = ufunc_compiler.compile_module_(
-            llmod, [memref_ty] * num_inputs, (memref_ty,), "ufunc"
+            llmod,
+            [memref_ty] * num_inputs,
+            (memref_ty,),
+            "ufunc",
+            is_ufunc=True,
         )
-        return jit_func
+
+        def call_wrapper(*args, out=None):
+            if isinstance(memref_ty.element_type, ir.F64Type):
+                np_dtype = np.float64
+            elif isinstance(memref_ty.element_type, ir.F32Type):
+                np_dtype = np.float32
+            else:
+                raise TypeError(
+                    "The current array element type is not supported"
+                )
+            out_shape = np.broadcast(*args).shape
+            out = np.zeros(out_shape, dtype=np_dtype) if out is None else out
+            return jit_func(*args, out)
+
+        return call_wrapper
 
     return wrapper
 
@@ -180,9 +198,7 @@ if __name__ == "__main__":
         ConditionalExtendGraphtoRVSDG, Backend(), MyCostModel(), True
     )
 
-    @ufunc_vectorize(
-        input_type=Float64, shape=(10, 10), ufunc_compiler=compiler
-    )
+    @ufunc_vectorize(input_type=Float64, ndim=2, ufunc_compiler=compiler)
     def foo(a, b, c):
         x = a + 1.0
         y = b - 2.0
