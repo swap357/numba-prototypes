@@ -1,4 +1,5 @@
 from typing import List, Union
+from egglog import EGraph
 
 
 def tokenize(egglog_str: str) -> List[str]:
@@ -48,6 +49,7 @@ def parse_sexps(tokens: List[str]) -> List[Union[str, list]]:
         return current[0]
     return current
 
+
 def sexp_to_string(sexp):
     """Convert parsed S-expression back to original string format"""
     if isinstance(sexp, str):
@@ -57,6 +59,7 @@ def sexp_to_string(sexp):
         return f"({inner})"
     else:
         return str(sexp)
+
 
 LATEX_ESCAPE = str.maketrans({
     "_": r"\_",
@@ -71,6 +74,7 @@ LATEX_ESCAPE = str.maketrans({
     "\\": r"\\",
 })
 
+
 def _atom_tex(a: str) -> str:
     try:
         float(a)        # leave numerics bare
@@ -78,7 +82,9 @@ def _atom_tex(a: str) -> str:
     except ValueError:
         return r"\text{" + a.translate(LATEX_ESCAPE) + "}"
 
+
 INFIX_OPS = {"=", "!=", "<", "<=", ">", ">=", "+", "-", "*", "/", "%", "**"}
+
 
 def _sexp_tex(x) -> str:
     if isinstance(x, str):
@@ -95,13 +101,16 @@ def _sexp_tex(x) -> str:
         + "(" + ", ".join(_sexp_tex(a) for a in args) + ")"
     )
 
+
 def _is_set_expr(x):
     # Detects if x is a set-like S-expression: ['set', lhs, rhs]
     return isinstance(x, list) and len(x) == 3 and x[0] == "set"
 
+
 def _set_tex(x):
     # Renders set(lhs, rhs) as lhs \to rhs
     return f"{_sexp_tex(x[1])} \\to {_sexp_tex(x[2])}"
+
 
 def to_latex(sexp):
     """
@@ -160,3 +169,45 @@ def to_latex(sexp):
         return rf"\frac{{{num}}}{{{den}}}"
 
     return None
+
+
+def visualize_ruleset_latex(ruleset, verbose=True):
+    """
+    Visualize an egglog ruleset by converting it to LaTeX representation.
+    Only works in notebook environments.
+
+    Args:
+        ruleset: The egglog ruleset to visualize
+        verbose: If True, prints the original S-expression before LaTeX display
+
+    Returns:
+        None, but displays LaTeX representation if in notebook environment
+    """
+    try:
+        shell = get_ipython().__class__.__name__
+        is_notebook = shell == "ZMQInteractiveShell"
+    except NameError:
+        is_notebook = False
+
+    if not is_notebook:
+        return
+
+    # Create demo egraph and run ruleset
+    demo_egraph = EGraph(save_egglog_string=True)
+    demo_egraph.run(ruleset)
+    egglog_str = demo_egraph.as_egglog_string
+
+    # Parse into S-expressions
+    tokens = tokenize(egglog_str)
+    sexps = parse_sexps(tokens)
+
+    from IPython.display import display, Math
+
+    for sexp in sexps:
+        tex = to_latex(sexp)
+        if tex:
+            if verbose:
+                print(sexp_to_string(sexp))
+            display(Math(tex))
+            if verbose:
+                print()
