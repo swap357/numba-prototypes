@@ -31,4 +31,6 @@ jobs:
     - name: Run tests
       working-directory: sealir-tutorials
       run: |
-        conda run -n sealir_tutorial pytest tests/ -v
+        conda activate sealir_tutorial
+        conda env list
+        make test
