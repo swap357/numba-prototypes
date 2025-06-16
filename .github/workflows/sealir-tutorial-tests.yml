@@ -24,10 +24,6 @@ jobs:
         miniconda-version: "latest"
         auto-activate-base: false
 
-    - name: Update conda
-      run: |
-        conda update -n base -c defaults conda -y
-
     - name: Create conda environment
       run: |
         conda env create --file sealir-tutorials/conda_environment.yml
