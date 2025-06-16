@@ -185,21 +185,24 @@ class GPUBackend(_Backend):
 
 
 if __name__ == "__main__":
-    gpu_compiler = Compiler(
-        ConditionalExtendGraphtoRVSDG, GPUBackend(), MyCostModel(), True
-    )
+    if not cuda.is_available():
+        print("SKIPPED. CUDA unavailable")
+    else:
+        gpu_compiler = Compiler(
+            ConditionalExtendGraphtoRVSDG, GPUBackend(), MyCostModel(), True
+        )
 
-    @ufunc_vectorize(input_type=Float64, ndim=2, ufunc_compiler=gpu_compiler)
-    def foo(a, b, c):
-        x = a + 1.0
-        y = b - 2.0
-        z = c + 3.0
-        return x + y + z
+        @ufunc_vectorize(input_type=Float64, ndim=2, ufunc_compiler=gpu_compiler)
+        def foo(a, b, c):
+            x = a + 1.0
+            y = b - 2.0
+            z = c + 3.0
+            return x + y + z
 
-    # Create NumPy arrays
-    ary = np.arange(100, dtype=np.float64).reshape(10, 10)
-    ary_2 = np.arange(100, dtype=np.float64).reshape(10, 10)
-    ary_3 = np.arange(100, dtype=np.float64).reshape(10, 10)
+        # Create NumPy arrays
+        ary = np.arange(100, dtype=np.float64).reshape(10, 10)
+        ary_2 = np.arange(100, dtype=np.float64).reshape(10, 10)
+        ary_3 = np.arange(100, dtype=np.float64).reshape(10, 10)
 
-    got = foo(ary, ary_2, ary_3)
-    print("Got", got)
+        got = foo(ary, ary_2, ary_3)
+        print("Got", got)
