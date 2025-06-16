@@ -31,5 +31,5 @@ jobs:
       run: |
         source $CONDA/bin/activate
         conda activate sealir_tutorial
-        conda env list
+        conda list
         make test
