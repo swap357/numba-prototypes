@@ -21,10 +21,18 @@ jobs:
       uses: conda-incubator/setup-miniconda@v3
       with:
         python-version: ${{ matrix.python-version }}
-        environment-file: sealir-tutorials/conda_environment.yml
-        activate-environment: sealir_tutorial
+        miniconda-version: "latest"
+        auto-activate-base: false
+
+    - name: Update conda
+      run: |
+        conda update -n base -c defaults conda -y
+
+    - name: Create conda environment
+      run: |
+        conda env create --file sealir-tutorials/conda_environment.yml
 
     - name: Run tests
       working-directory: sealir-tutorials
       run: |
-        pytest tests/ -v
+        conda run -n sealir_tutorial pytest tests/ -v
