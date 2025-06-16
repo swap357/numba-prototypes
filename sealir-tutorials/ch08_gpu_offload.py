@@ -39,6 +39,7 @@ from ch05_typeinfer_array import NbOp_ArrayType
 from ch06_mlir_backend import Backend as _Backend
 from ch06_mlir_backend import ConditionalExtendGraphtoRVSDG, NbOp_Type
 from ch07_mlir_ufunc import Float64, ufunc_vectorize
+from utils import IN_NOTEBOOK
 
 # Requires the CUDA toolkit.
 # If using `conda install cuda`, set `CUDA_HOME=$CONDA_PREFIX`
@@ -74,7 +75,8 @@ class GPUBackend(_Backend):
 
         if _DEBUG:
             module.context.enable_multithreading(False)
-        if _DEBUG:
+        if _DEBUG and not IN_NOTEBOOK:
+            # notebook may hang if ir_printing is enabled and and MLIR failed.
             pass_man.enable_ir_printing()
 
         pass_man.add("convert-linalg-to-affine-loops")

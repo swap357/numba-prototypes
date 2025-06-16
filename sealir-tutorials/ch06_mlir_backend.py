@@ -72,6 +72,7 @@ from ch04_2_typeinfer_loops import (
     NbOp_Not_Int64,
 )
 from ch04_2_typeinfer_loops import base_ruleset as loop_ruleset
+from utils import IN_NOTEBOOK
 
 _DEBUG = False
 
@@ -178,7 +179,8 @@ class Backend:
 
         if _DEBUG:
             module.context.enable_multithreading(False)
-        if _DEBUG:
+        if _DEBUG and not IN_NOTEBOOK:
+            # notebook may hang if ir_printing is enabled and and MLIR failed.
             pass_man.enable_ir_printing()
 
         pass_man = passmanager.PassManager(context=module.context)
