@@ -1,0 +1,30 @@
+name: sealir-tutorial-tests
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.12"]
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Miniconda
+      uses: conda-incubator/setup-miniconda@v3
+      with:
+        python-version: ${{ matrix.python-version }}
+        environment-file: sealir-tutorials/conda_environment.yml
+        activate-environment: sealir_tutorial
+
+    - name: Run tests
+      working-directory: sealir-tutorials
+      run: |
+        pytest tests/ -v
