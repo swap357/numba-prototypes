@@ -1,6 +1,11 @@
-from textwrap import dedent
-
+import ch09_whole_program_compiler_driver
 from ch09_whole_program_compiler_driver import *
+
+from .autotests import autotest_notebook
+
+
+def test_ch09_autotest():
+    autotest_notebook(ch09_whole_program_compiler_driver)
 
 
 def test_call_graph():
