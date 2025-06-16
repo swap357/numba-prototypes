@@ -2,6 +2,14 @@
 
 This is a pure NumPy implementation of the Llama 3 model using the [stories15M model](https://huggingface.co/karpathy/tinyllamas/tree/main) trained by Andrej Karpathy, which is a smaller version of Llama2 designed for educational purposes.
 
+## Requirements
+
+```bash
+pip install -r requirements.txt
+```
+
+The only dependency is NumPy (version 1.24.0 or higher).
+
 ## Setup
 
 ### 1. Download Pre-converted Files
