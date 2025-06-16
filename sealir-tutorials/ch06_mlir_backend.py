@@ -20,8 +20,7 @@ from __future__ import annotations
 import ctypes
 from contextlib import contextmanager
 from dataclasses import dataclass
-from traceback import print_exception
-from typing import Any, Callable
+from typing import Callable
 
 import mlir.dialects.arith as arith
 import mlir.dialects.cf as cf
@@ -31,7 +30,6 @@ import mlir.execution_engine as execution_engine
 import mlir.ir as ir
 import mlir.passmanager as passmanager
 import mlir.runtime as runtime
-import numba.cuda
 import numpy as np
 from sealir import ase
 from sealir.rvsdg import grammar as rg
@@ -74,7 +72,6 @@ from ch04_2_typeinfer_loops import (
     NbOp_Not_Int64,
 )
 from ch04_2_typeinfer_loops import base_ruleset as loop_ruleset
-from utils import IN_NOTEBOOK
 
 _DEBUG = False
 
