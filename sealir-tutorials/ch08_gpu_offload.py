@@ -19,31 +19,42 @@
 
 from __future__ import annotations
 
+import ctypes
+import os
+from collections import namedtuple
+from ctypes.util import find_library
+
+import mlir.execution_engine as execution_engine
+import mlir.ir as ir
+import mlir.passmanager as passmanager
+import mlir.runtime as runtime
 import numpy as np
+from numba import cuda
+
 from ch04_2_typeinfer_loops import (
-    MyCostModel,
     Compiler,
+    MyCostModel,
 )
 from ch05_typeinfer_array import NbOp_ArrayType
-from ch06_mlir_backend import ConditionalExtendGraphtoRVSDG, Backend as _Backend, NbOp_Type
-from ch07_mlir_ufunc import ufunc_vectorize, Float64
+from ch06_mlir_backend import Backend as _Backend
+from ch06_mlir_backend import ConditionalExtendGraphtoRVSDG, NbOp_Type
+from ch07_mlir_ufunc import Float64, ufunc_vectorize
+from utils import IN_NOTEBOOK
 
-import mlir.ir as ir
-import mlir.execution_engine as execution_engine
-import mlir.runtime as runtime
-import mlir.passmanager as passmanager
-import ctypes
-from ctypes.util import find_library
-from numba import cuda
-from collections import namedtuple
+# Requires the CUDA toolkit.
+# If using `conda install cuda`, set `CUDA_HOME=$CONDA_PREFIX`
+if "CUDA_HOME" not in os.environ and "CONDA_PREFIX" in os.environ:
+    os.environ["CUDA_HOME"] = os.environ["CONDA_PREFIX"]
+
 
 _DEBUG = True
+
 
 class GPUBackend(_Backend):
     # Lower symbolic array to respective memref.
     # Note: This is not used within ufunc builder,
     # since it has explicit declaration of the respective
-    # MLIR memrefs. 
+    # MLIR memrefs.
     def lower_type(self, ty: NbOp_Type):
         match ty:
             case NbOp_ArrayType(
@@ -54,27 +65,32 @@ class GPUBackend(_Backend):
             ):
                 mlir_dtype = self.lower_type(dtype)
                 with self.loc:
-                    memref_ty=ir.MemRefType.get(shape, mlir_dtype)
+                    memref_ty = ir.MemRefType.get(shape, mlir_dtype)
                 return memref_ty
         return super().lower_type(ty)
 
     def run_passes(self, module):
         module.dump()
-        pass_man = passmanager.PassManager(context=module.context)        
+        pass_man = passmanager.PassManager(context=module.context)
 
         if _DEBUG:
             module.context.enable_multithreading(False)
-        if _DEBUG:
-            pass_man.enable_ir_printing()   
+        if _DEBUG and not IN_NOTEBOOK:
+            # notebook may hang if ir_printing is enabled and and MLIR failed.
+            pass_man.enable_ir_printing()
 
         pass_man.add("convert-linalg-to-affine-loops")
         pass_man.add("affine-loop-fusion")
         pass_man.add("inline")
         pass_man.add("func.func(affine-parallelize)")
-        pass_man.add("builtin.module(func.func(gpu-map-parallel-loops,convert-parallel-loops-to-gpu))")
+        pass_man.add(
+            "builtin.module(func.func(gpu-map-parallel-loops,convert-parallel-loops-to-gpu))"
+        )
         pass_man.add("lower-affine")
         pass_man.add("scf-parallel-loop-fusion")
-        pass_man.add('func.func(gpu-map-parallel-loops,convert-parallel-loops-to-gpu)')
+        pass_man.add(
+            "func.func(gpu-map-parallel-loops,convert-parallel-loops-to-gpu)"
+        )
         pass_man.add("gpu-kernel-outlining")
         pass_man.add('gpu-lower-to-nvvm-pipeline{cubin-format="fatbin"}')
         pass_man.add("convert-scf-to-cf")
@@ -108,13 +124,19 @@ class GPUBackend(_Backend):
             elif isinstance(mlir_ty.element_type, ir.F32Type):
                 np_dtype = np.float32
             else:
-                raise TypeError("The current array element type is not supported")
-            val = np.zeros(mlir_ty.shape, dtype=np_dtype) if val is None else val
+                raise TypeError(
+                    "The current array element type is not supported"
+                )
+            val = (
+                np.zeros(mlir_ty.shape, dtype=np_dtype) if val is None else val
+            )
             val = cls.np_arr_to_np_duck_device_arr(val)
-            ptr = ctypes.pointer(ctypes.pointer(runtime.get_ranked_memref_descriptor(val)))
+            ptr = ctypes.pointer(
+                ctypes.pointer(runtime.get_ranked_memref_descriptor(val))
+            )
 
         return ptr, val
-    
+
     @classmethod
     def get_out_val(cls, res_ptr, res_val):
         if isinstance(res_val, cuda.cudadrv.devicearray.DeviceNDArray):
@@ -126,34 +148,61 @@ class GPUBackend(_Backend):
     def np_arr_to_np_duck_device_arr(cls, arr):
         da = cuda.to_device(arr)
         ctlie = namedtuple("ctypes_lie", "data data_as shape")
-        da.ctypes = ctlie(da.__cuda_array_interface__["data"][0],
-                    lambda x: ctypes.cast(da.ctypes.data, x),
-                    da.__cuda_array_interface__["shape"],)
+        da.ctypes = ctlie(
+            da.__cuda_array_interface__["data"][0],
+            lambda x: ctypes.cast(da.ctypes.data, x),
+            da.__cuda_array_interface__["shape"],
+        )
         da.itemsize = arr.itemsize
         return da
 
     @classmethod
-    def jit_compile_(cls, llmod, input_types, output_types, function_name="func", exec_engine=None, **execution_engine_params):
-        cuda_libs = ("mlir_cuda_runtime", "mlir_c_runner_utils", "mlir_runner_utils")
+    def jit_compile_(
+        cls,
+        llmod,
+        input_types,
+        output_types,
+        function_name="func",
+        exec_engine=None,
+        **execution_engine_params,
+    ):
+        cuda_libs = (
+            "mlir_cuda_runtime",
+            "mlir_c_runner_utils",
+            "mlir_runner_utils",
+        )
         cuda_shared_libs = [find_library(x) for x in cuda_libs]
-        return super().jit_compile_(llmod, input_types, output_types, function_name, exec_engine=execution_engine.ExecutionEngine(llmod, opt_level=3, shared_libs=cuda_shared_libs))
+        return super().jit_compile_(
+            llmod,
+            input_types,
+            output_types,
+            function_name,
+            exec_engine=execution_engine.ExecutionEngine(
+                llmod, opt_level=3, shared_libs=cuda_shared_libs
+            ),
+            **execution_engine_params,
+        )
 
 
 if __name__ == "__main__":
-    gpu_compiler = Compiler(ConditionalExtendGraphtoRVSDG, GPUBackend(), MyCostModel(), True)
+    if not cuda.is_available():
+        print("SKIPPED. CUDA unavailable")
+    else:
+        gpu_compiler = Compiler(
+            ConditionalExtendGraphtoRVSDG, GPUBackend(), MyCostModel(), True
+        )
 
-    @ufunc_vectorize(input_type=Float64, shape=(10, 10), ufunc_compiler=gpu_compiler)
-    def foo(a, b, c):
-        x = a + 1.0
-        y = b - 2.0
-        z = c + 3.0
-        return x + y + z
+        @ufunc_vectorize(input_type=Float64, ndim=2, ufunc_compiler=gpu_compiler)
+        def foo(a, b, c):
+            x = a + 1.0
+            y = b - 2.0
+            z = c + 3.0
+            return x + y + z
 
-    # Create NumPy arrays 
-    ary = np.arange(100, dtype=np.float64).reshape(10, 10)
-    ary_2 = np.arange(100, dtype=np.float64).reshape(10, 10)
-    ary_3 = np.arange(100, dtype=np.float64).reshape(10, 10)
+        # Create NumPy arrays
+        ary = np.arange(100, dtype=np.float64).reshape(10, 10)
+        ary_2 = np.arange(100, dtype=np.float64).reshape(10, 10)
+        ary_3 = np.arange(100, dtype=np.float64).reshape(10, 10)
 
-    got = foo(ary, ary_2, ary_3)
-    print("Got", got)
-
+        got = foo(ary, ary_2, ary_3)
+        print("Got", got)

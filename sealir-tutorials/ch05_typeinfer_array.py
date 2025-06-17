@@ -63,6 +63,9 @@ from ch04_1_typeinfer_ifelse import (
 )
 from ch04_2_typeinfer_loops import Backend as _ch04_2_Backend
 from ch04_2_typeinfer_loops import (
+    Compiler,
+)
+from ch04_2_typeinfer_loops import (
     ExtendEGraphToRVSDG as _ch04_2_ExtendEGraphToRVSDG,
 )
 from ch04_2_typeinfer_loops import (
@@ -74,7 +77,6 @@ from ch04_2_typeinfer_loops import (
     TypeInt64,
     TypeVar,
     base_ruleset,
-    Compiler,
     setup_argtypes,
 )
 from utils import IN_NOTEBOOK

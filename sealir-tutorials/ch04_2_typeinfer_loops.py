@@ -49,6 +49,9 @@ from ch03_egraph_program_rewrites import (
 )
 from ch04_1_typeinfer_ifelse import Backend as _ch04_1_Backend
 from ch04_1_typeinfer_ifelse import (
+    Compiler,
+)
+from ch04_1_typeinfer_ifelse import (
     ExtendEGraphToRVSDG as _ch04_1_ExtendEGraphToRVSDG,
 )
 from ch04_1_typeinfer_ifelse import (
@@ -66,7 +69,6 @@ from ch04_1_typeinfer_ifelse import (
 )
 from ch04_1_typeinfer_ifelse import base_ruleset as _ch4_1_base_ruleset
 from ch04_1_typeinfer_ifelse import (
-    Compiler,
     ruleset_failed_to_unify,
     ruleset_type_infer_failure_report,
     ruleset_type_infer_float,

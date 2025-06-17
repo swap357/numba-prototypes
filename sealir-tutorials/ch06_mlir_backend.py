@@ -20,30 +20,27 @@ from __future__ import annotations
 import ctypes
 from contextlib import contextmanager
 from dataclasses import dataclass
-from traceback import print_exception
-from typing import Any, Callable
+from typing import Callable
 
 import mlir.dialects.arith as arith
 import mlir.dialects.cf as cf
 import mlir.dialects.func as func
 import mlir.dialects.scf as scf
-import mlir.runtime as runtime
 import mlir.execution_engine as execution_engine
-import mlir.runtime as runtime
-
 import mlir.ir as ir
 import mlir.passmanager as passmanager
-import numba.cuda
+import mlir.runtime as runtime
+import numpy as np
 from sealir import ase
 from sealir.rvsdg import grammar as rg
 from sealir.rvsdg import internal_prefix
-import numpy as np
 
 from ch03_egraph_program_rewrites import (
     run_test,
 )
 from ch04_1_typeinfer_ifelse import (
     Attributes,
+    Compiler,
 )
 from ch04_1_typeinfer_ifelse import (
     ExtendEGraphToRVSDG as ConditionalExtendGraphtoRVSDG,
@@ -65,7 +62,6 @@ from ch04_1_typeinfer_ifelse import (
 )
 from ch04_1_typeinfer_ifelse import base_ruleset as if_else_ruleset
 from ch04_1_typeinfer_ifelse import (
-    Compiler,
     ruleset_type_infer_float,
     setup_argtypes,
 )
@@ -79,6 +75,7 @@ from ch04_2_typeinfer_loops import base_ruleset as loop_ruleset
 from utils import IN_NOTEBOOK
 
 _DEBUG = False
+
 
 @dataclass(frozen=True)
 class LowerStates(ase.TraverseState):
@@ -117,7 +114,7 @@ class Backend:
 
         # Get the module body pointer so we can insert content into the
         # module.
-        self.module_body = module_body =  ir.InsertionPoint(module.body)
+        self.module_body = module_body = ir.InsertionPoint(module.body)
         # Convert SealIR types to MLIR types.
         input_types = tuple([self.lower_type(x) for x in argtypes])
         output_types = (
@@ -182,10 +179,11 @@ class Backend:
 
         if _DEBUG:
             module.context.enable_multithreading(False)
-        if _DEBUG:
+        if _DEBUG and not IN_NOTEBOOK:
+            # notebook may hang if ir_printing is enabled and and MLIR failed.
             pass_man.enable_ir_printing()
 
-        pass_man = passmanager.PassManager(context=module.context)           
+        pass_man = passmanager.PassManager(context=module.context)
         pass_man.add("convert-linalg-to-loops")
         pass_man.add("convert-scf-to-cf")
         pass_man.add("finalize-memref-to-llvm")
@@ -414,21 +412,38 @@ class Backend:
         return self.jit_compile_(llmod, input_types, output_types)
 
     @classmethod
-    def jit_compile_(cls, llmod, input_types, output_types, function_name="func", exec_engine=None, **execution_engine_params):
+    def jit_compile_(
+        cls,
+        llmod,
+        input_types,
+        output_types,
+        function_name="func",
+        exec_engine=None,
+        is_ufunc=False,
+        **execution_engine_params,
+    ):
         # Converts the MLIR module into a JIT-callable function.
         # Use MLIR's own internal execution engine
         if exec_engine is None:
-            engine = execution_engine.ExecutionEngine(llmod, **execution_engine_params)
+            engine = execution_engine.ExecutionEngine(
+                llmod, **execution_engine_params
+            )
         else:
             engine = exec_engine
-    
+
         assert (
             len(output_types) == 1
         ), "Execution of functions with output arguments > 1 not supported"
-        res_ptr, res_val = cls.get_exec_ptr(output_types[0], None)
+        nout = len(output_types)
 
         # Build a wrapper function
-        def jit_func(*input_args):
+        def jit_func(*args):
+            if is_ufunc:
+                input_args = args[:-nout]
+                output_args = args[-nout:]
+            else:
+                input_args = args
+                output_args = [None]
             assert len(input_args) == len(input_types)
             for arg, arg_ty in zip(input_args, input_types):
                 # assert isinstance(arg, arg_ty)
@@ -446,6 +461,9 @@ class Backend:
             # _mlir_ciface_function_name as a void pointer with the given
             # input pointers, there can only be one resulting pointer
             # appended to the end of all input pointers in the invoke call.
+            res_ptr, res_val = cls.get_exec_ptr(
+                output_types[0], output_args[0]
+            )
             engine.invoke(function_name, *input_exec_ptrs, res_ptr)
 
             return cls.get_out_val(res_ptr, res_val)
@@ -469,18 +487,28 @@ class Backend:
             elif isinstance(mlir_ty.element_type, ir.F32Type):
                 np_dtype = np.float32
             else:
-                raise TypeError("The current array element type is not supported")
-            val = np.zeros(mlir_ty.shape, dtype=np_dtype) if val is None else val
-            ptr = ctypes.pointer(ctypes.pointer(runtime.get_ranked_memref_descriptor(val)))
+                raise TypeError(
+                    "The current array element type is not supported"
+                )
+
+            if val is None:
+                if not mlir_ty.has_static_shape:
+                    raise ValueError(f"{mlir_ty} does not have static shape")
+                val = np.zeros(mlir_ty.shape, dtype=np_dtype)
+
+            ptr = ctypes.pointer(
+                ctypes.pointer(runtime.get_ranked_memref_descriptor(val))
+            )
 
         return ptr, val
-    
+
     @classmethod
     def get_out_val(cls, res_ptr, res_val):
         if isinstance(res_val, np.ndarray):
             return res_val
         else:
             return res_ptr.contents.value
+
 
 # + [markdown] jp-MarkdownHeadingCollapsed=true
 # Example 1: simple if-else
@@ -494,7 +522,10 @@ def example_1(a, b):
         z = b - a
     return z + a
 
-compiler = Compiler(ConditionalExtendGraphtoRVSDG, Backend(), MyCostModel(), True)
+
+compiler = Compiler(
+    ConditionalExtendGraphtoRVSDG, Backend(), MyCostModel(), True
+)
 
 if __name__ == "__main__":
     llvm_module, func_egraph = compiler.lower_py_fn(
@@ -551,6 +582,7 @@ def example_3(init, n):
         c = c + float(i)
         i = i + 1
     return c
+
 
 compiler = Compiler(LoopExtendEGraphToRVSDG, Backend(), MyCostModel(), True)
 

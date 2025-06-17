@@ -14,6 +14,8 @@
 
 # import needed modules:
 
+import mlir.dialects.arith as arith
+import mlir.dialects.math as math
 import mlir.ir as ir
 import numpy as np
 from egglog import (
@@ -61,20 +63,19 @@ from ch04_1_typeinfer_ifelse import (
     setup_argtypes,
 )
 from ch05_typeinfer_array import (
+    Compiler,
     ExtendEGraphToRVSDG,
 )
 from ch05_typeinfer_array import MyCostModel as ch06_CostModel
 from ch05_typeinfer_array import (
     base_ruleset,
-    Compiler,
 )
 from ch06_mlir_backend import LowerStates, run_test
-from ch07_mlir_ufunc import ufunc_vectorize, Float32, Backend as UfuncBackend, TypeFloat32
-from ch08_gpu_offload import GPUBackend
-import mlir.dialects.arith as arith
-import mlir.dialects.math as math
+from ch07_mlir_ufunc import Backend as UfuncBackend
+from ch07_mlir_ufunc import Float32, TypeFloat32, ufunc_vectorize
 
 # ## The GELU function
+
 
 def gelu_tanh_forward(a):
     dt = np.float32
@@ -288,6 +289,7 @@ class NbOp_Mul_Float32(NbOp_Base):
     lhs: SExpr
     rhs: SExpr
 
+
 class NbOp_Div_Float32(NbOp_Base):
     lhs: SExpr
     rhs: SExpr
@@ -493,6 +495,7 @@ if __name__ == "__main__":
     compiler.run_backend_passes(llvm_module)
     jit_func = compiler.compile_module(llvm_module, func_egraph)
 
+
 # ### Compare the result
 #
 # Since this is an approximation (and IEEE754), the results are good at
@@ -502,17 +505,16 @@ if __name__ == "__main__":
     relclose = lambda x, y: np.allclose(x, y, rtol=1e-6)
     run_test(gelu_tanh_forward, jit_func, (0.234,), equal=relclose)
 
-    vectorized_gelu = ufunc_vectorize(input_type=Float32, shape=(10,), ufunc_compiler=compiler, extra_ruleset=additional_rules)(gelu_tanh_forward)
-    relclose = lambda x, y: np.allclose(x, y, rtol=1e-6)
-    input_val = np.array([0.234]*10, dtype=np.float32)
-    run_test(gelu_tanh_forward, vectorized_gelu, (input_val,), equal=relclose)
 
-    class Backend2(Backend, GPUBackend):
-        pass
-    
-    gpu_compiler = Compiler(ExtendEGraphToRVSDG, Backend2(), MyCostModel(), True)
+# ### Ufunc version
 
-    vectorized_gelu = ufunc_vectorize(input_type=Float32, shape=(10,), ufunc_compiler=gpu_compiler, extra_ruleset=additional_rules)(gelu_tanh_forward)
+if __name__ == "__main__":
+    vectorized_gelu = ufunc_vectorize(
+        input_type=Float32,
+        ndim=1,
+        ufunc_compiler=compiler,
+        extra_ruleset=additional_rules,
+    )(gelu_tanh_forward)
     relclose = lambda x, y: np.allclose(x, y, rtol=1e-6)
-    input_val = np.array([0.234]*10, dtype=np.float32)
+    input_val = np.random.random(100).astype(np.float32)
     run_test(gelu_tanh_forward, vectorized_gelu, (input_val,), equal=relclose)
