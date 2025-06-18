@@ -1,0 +1,64 @@
+{% set name = "sealir-tutorials" %}
+{% set version = "0.1.0" %}
+
+package:
+  name: {{ name|lower }}
+  version: {{ version }}
+
+source:
+  path: ../
+
+build:
+  noarch: python
+  number: 0
+  script: build.sh  # [unix]
+  script: build.bat  # [win]
+
+requirements:
+  host:
+    - python >=3.10
+    - pip
+    - setuptools
+  run:
+    - python >=3.10
+    - llvmlite >=0.44.0
+    - mlir >=19.1.0
+    - mlir-python-bindings >=19.1.0
+    - pytest
+    - networkx
+    - numpy
+    - nbconvert
+    - ipykernel
+    - jupyter
+    - jupytext
+    - graphviz
+    - egglog
+    - numba_rvsdg
+    - pip
+    - pytest-xdist
+  run_constrained:
+    - sealir
+
+test:
+  imports:
+    - ch01_basic_compiler
+    - ch02_egraph_basic
+    - utils
+  commands:
+    - python -c "import ch01_basic_compiler; print('Import successful')"
+    - python -c "import utils; print('Utils import successful')"
+    - pytest --collect-only --pyargs sealir_tutorials || true
+
+about:
+  home: https://github.com/numba/numba-prototypes
+  license: BSD-2-Clause
+  license_family: BSD
+  license_file: ../LICENSE
+  summary: 'Kaleidoscope-style tutorials for Numba v2 compiler design'
+  description: |
+    This is a kaleidoscope-style tutorial that systematically explains and
+    demonstrates key concepts for Numba v2, and progressively builds an advanced
+    compiler that integrates Egraph and MLIR. Each chapter is written as a
+    runnable script and is convertible into notebook via jupytext.
+  doc_url: https://numba.pydata.org/numba-prototypes/sealir_tutorials/
+  dev_url: https://github.com/numba/numba-prototypes
