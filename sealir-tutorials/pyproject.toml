@@ -1,0 +1,48 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sealir-tutorials"
+version = "0.1.0"
+description = "Kaleidoscope-style tutorials for building a Numba v2 compiler with Egraph and MLIR."
+readme = "README.md"
+requires-python = ">=3.12"
+license = {text = "BSD-2-Clause"}
+dependencies = [
+  "llvmlite==0.44.*",
+  "mlir==19.1.*",
+  "mlir-python-bindings==19.1.*",
+  "networkx",
+  "numpy",
+  "nbconvert",
+  "ipykernel",
+  "jupyter",
+  "jupytext",
+  "make",
+  "graphviz",
+  "egglog",
+  "numba_rvsdg",
+  "sealir",
+  "pytest",
+  "pytest-xdist",
+]
+
+[tool.setuptools]
+py-modules = [
+  "ch01_basic_compiler",
+  "ch02_egraph_basic",
+  "ch03_egraph_program_rewrites",
+  "ch04_0_typeinfer_prelude",
+  "ch04_1_typeinfer_ifelse",
+  "ch04_2_typeinfer_loops",
+  "ch05_typeinfer_array",
+  "ch06_mlir_backend",
+  "ch07_mlir_ufunc",
+  "ch08_gpu_offload",
+  "ch09_whole_program_compiler_driver",
+  "demo01_gelu_tanh_approx",
+  "index",
+  "llm",
+  "utils",
+]

@@ -14,6 +14,7 @@ requirements:
   host:
     - python >=3.12
     - pip
+    - setuptools
   run:
     - python >=3.12
     - llvmlite =0.44.*
@@ -42,8 +43,9 @@ test:
 about:
   home: https://github.com/numba/numba-prototypes
   license: BSD-2-Clause
+  license_file: ../LICENSE
   summary: Kaleidoscope-style tutorials for building a Numba v2 compiler with Egraph and MLIR.
 
 extra:
   recipe-maintainers:
-    - TODO
+    - numba-dev
