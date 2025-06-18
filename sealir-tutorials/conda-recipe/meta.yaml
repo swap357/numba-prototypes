@@ -16,14 +16,14 @@ build:
 
 requirements:
   host:
-    - python >=3.10
+    - python =3.12
     - pip
     - setuptools
   run:
     - python >=3.10
-    - llvmlite >=0.44.0
-    - mlir >=19.1.0
-    - mlir-python-bindings >=19.1.0
+    - llvmlite =0.44.*
+    - mlir =19.1.*
+    - mlir-python-bindings =19.1.*
     - pytest
     - networkx
     - numpy

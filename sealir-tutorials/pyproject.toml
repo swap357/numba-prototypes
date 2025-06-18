@@ -26,7 +26,7 @@ classifiers = [
 keywords = ["numba", "compiler", "tutorial", "mlir", "egraph"]
 requires-python = ">=3.10"
 dependencies = [
-    "llvmlite>=0.44.0",
+    "llvmlite>=0.44.0,<0.45",
     "numpy",
     "networkx",
     "pytest",
