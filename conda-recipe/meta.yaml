@@ -1,0 +1,51 @@
+package:
+  name: sealir-tutorials
+  version: 0.1.0
+
+source:
+  path: ../sealir-tutorials
+
+build:
+  number: 0
+  noarch: python
+  script: ${PYTHON} -m pip install --no-deps --no-build-isolation .
+
+requirements:
+  host:
+    - python >=3.12
+    - pip
+    - setuptools
+  run:
+    - python >=3.12
+    - llvmlite =0.44.*
+    - mlir =19.1.*
+    - mlir-python-bindings =19.1.*
+    - networkx
+    - numpy
+    - nbconvert
+    - ipykernel
+    - jupyter
+    - jupytext
+    - make
+    - graphviz
+    - egglog
+    - numba_rvsdg
+    - sealir
+    - pytest
+    - pytest-xdist
+
+test:
+  source_files:
+    - tests
+  commands:
+    - pytest -vv
+
+about:
+  home: https://github.com/numba/numba-prototypes
+  license: BSD-2-Clause
+  license_file: ../LICENSE
+  summary: Kaleidoscope-style tutorials for building a Numba v2 compiler with Egraph and MLIR.
+
+extra:
+  recipe-maintainers:
+    - numba-dev
