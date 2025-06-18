@@ -11,8 +11,6 @@ source:
 build:
   noarch: python
   number: 0
-  script: build.sh  # [unix]
-  script: build.bat  # [win]
 
 requirements:
   host:
@@ -53,7 +51,7 @@ about:
   home: https://github.com/numba/numba-prototypes
   license: BSD-2-Clause
   license_family: BSD
-  license_file: ../LICENSE
+  license_file: ../../LICENSE
   summary: 'Kaleidoscope-style tutorials for Numba v2 compiler design'
   description: |
     This is a kaleidoscope-style tutorial that systematically explains and
