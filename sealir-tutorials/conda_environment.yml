@@ -17,6 +17,7 @@ dependencies:
   - jupytext
   - make
   - graphviz
+  - pygraphviz
   - pip
   - pip:
     - egglog
