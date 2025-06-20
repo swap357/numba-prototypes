@@ -1,0 +1,41 @@
+name: build notebooks
+
+on:
+  # Runs on pull requests
+  pull_request:
+    branches: [$default-branch]
+
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+
+# Allow only one concurrent run per PR
+concurrency:
+  group: "pr-build-${{ github.event.number }}"
+  cancel-in-progress: true
+
+jobs:
+  # Build job
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - name: Clone repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - name: Setup Miniconda
+        uses: conda-incubator/setup-miniconda@505e6394dae86d6a5c7fbb6e3fb8938e3e863830 # v3.1.1
+        with:
+          auto-activate-base: false
+          activate-environment: sealir_tutorial
+          environment-file: sealir-tutorials/conda_environment.yml
+
+      - name: Render notebooks
+        run: |
+          source $CONDA/bin/activate
+          conda activate sealir_tutorial
+          cd sealir-tutorials
+          make pages
