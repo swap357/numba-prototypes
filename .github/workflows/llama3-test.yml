@@ -2,9 +2,11 @@ name: Test Llama3 NumPy Implementation
 
 on:
   push:
+    branches: [ main ]
     paths:
       - 'examples/llama3/**'
   pull_request:
+    branches: [ main ]
     paths:
       - 'examples/llama3/**'
   workflow_dispatch:
