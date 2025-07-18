@@ -92,36 +92,30 @@ def test_llama3_against_golden():
 
     print("Model, tokenizer, and golden output files found")
 
-    try:
-        args = ModelArgs()
-        print(f"Using precision: {args.dtype}")
-        tokenizer = Tokenizer(tokenizer_path)
-        print("Tokenizer loaded successfully")
-        from llama3 import llama_init, llama_generate
-        model = llama_init(model_path, args)
-        print("Model loaded successfully")
+    args = ModelArgs()
+    print(f"Using precision: {args.dtype}")
+    tokenizer = Tokenizer(tokenizer_path)
+    print("Tokenizer loaded successfully")
+    from llama3 import llama_init, llama_generate
+    model = llama_init(model_path, args)
+    print("Model loaded successfully")
 
-        # Load golden output
-        golden_output = load_golden_output(golden_file)
-        print(f"Loaded golden output for prompt: '{golden_output['prompt']}'")
-        np.random.seed(42)
-        test_output = generate_test_output(
-            model, tokenizer, llama_generate,
-            prompt=golden_output["prompt"],
-            max_tokens=golden_output["max_tokens"]
-        )
-        print("Comparing to golden output...")
-        golden_test_passed = compare_outputs(golden_output, test_output)
-        if golden_test_passed:
-            print("Golden reference test: PASSED")
-        else:
-            print("Golden reference test: FAILED")
-        return golden_test_passed
-    except Exception as e:
-        print(f"Error during testing: {e}")
-        import traceback
-        traceback.print_exc()
-        return False
+    # Load golden output
+    golden_output = load_golden_output(golden_file)
+    print(f"Loaded golden output for prompt: '{golden_output['prompt']}'")
+    np.random.seed(42)
+    test_output = generate_test_output(
+        model, tokenizer, llama_generate,
+        prompt=golden_output["prompt"],
+        max_tokens=golden_output["max_tokens"]
+    )
+    print("Comparing to golden output...")
+    golden_test_passed = compare_outputs(golden_output, test_output)
+    if golden_test_passed:
+        print("Golden reference test: PASSED")
+    else:
+        print("Golden reference test: FAILED")
+    return golden_test_passed
 
 if __name__ == "__main__":
     print("Testing Llama3 NumPy Implementation (golden reference only)")
