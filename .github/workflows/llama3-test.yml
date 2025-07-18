@@ -33,9 +33,9 @@ jobs:
       run: |
         cd examples/llama3
         # Download pre-converted model weights from likejazz/llama3.np
-        wget --no-verbose -O stories15M.model.npz https://github.com/likejazz/llama3.np/raw/main/stories15M.model.npz
+        wget --no-verbose -O stories15M.model.npz https://github.com/likejazz/llama3.np/raw/7dae0e181efcba2e1fdca7d8718f73ba2505eb2f/stories15M.model.npz
         # Download pre-converted tokenizer
-        wget --no-verbose -O tokenizer.model.np https://github.com/likejazz/llama3.np/raw/main/tokenizer.model.np
+        wget --no-verbose -O tokenizer.model.np https://github.com/likejazz/llama3.np/raw/7dae0e181efcba2e1fdca7d8718f73ba2505eb2f/tokenizer.model.np
         # Verify files were downloaded
         ls -la *.npz *.np
 
